@@ -1,2 +1,2 @@
 [phases.setup]
-nixPkgs = ["mysql80"]
+aptPkgs = ["pkg-config", "default-libmysqlclient-dev"]
