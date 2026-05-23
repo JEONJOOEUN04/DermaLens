@@ -34,6 +34,15 @@ def _get_tokens(user):
     }
 
 
+@require_GET
+def check_email(request):
+    email = request.GET.get("email", "").strip()
+    if not email:
+        return JsonResponse({"success": False, "message": "email이 필요합니다."}, status=400)
+    exists = User.objects.filter(email=email).exists()
+    return JsonResponse({"success": True, "available": not exists})
+
+
 @csrf_exempt
 def signup(request):
     if request.method != "POST":
