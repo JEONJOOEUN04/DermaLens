@@ -2,9 +2,85 @@ from django.http import JsonResponse
 from django.views.decorators.http import require_GET
 from django.views.decorators.csrf import csrf_exempt
 from django.db.models import Q, Avg, Count
+from django.conf import settings
 import json
+import re
+import urllib.request
+import urllib.parse
 
 from .models import Ingredient, IngredientAlias, Product, ProductIngredient, Brand, Category, ProductLike
+
+
+# =====================
+# 네이버 쇼핑 API 연동
+# =====================
+
+def _strip_html(text):
+    return re.sub(r"<[^>]+>", "", text or "").strip()
+
+
+def _fetch_naver_products(keyword, display=20):
+    client_id = getattr(settings, "NAVER_CLIENT_ID", "") or ""
+    client_secret = getattr(settings, "NAVER_CLIENT_SECRET", "") or ""
+    if not client_id or not client_secret:
+        return []
+
+    url = "https://openapi.naver.com/v1/search/shop.json?" + urllib.parse.urlencode({
+        "query": keyword, "display": display, "sort": "sim"
+    })
+    req = urllib.request.Request(url, headers={
+        "X-Naver-Client-Id": client_id,
+        "X-Naver-Client-Secret": client_secret,
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read().decode("utf-8")).get("items", [])
+    except Exception:
+        return []
+
+
+def _get_or_create_brand(brand_name):
+    if not brand_name:
+        brand_name = "기타"
+    brand, _ = Brand.objects.get_or_create(
+        brand_name_kr=brand_name,
+        defaults={"brand_name_en": brand_name},
+    )
+    return brand
+
+
+def _get_default_category():
+    cat = Category.objects.filter(category_name="기타").first()
+    if not cat:
+        cat = Category.objects.order_by("category_id").first()
+    return cat
+
+
+def _save_naver_item(item):
+    """네이버 쇼핑 결과 한 건을 Product DB에 저장하고 반환."""
+    product_name = _strip_html(item.get("title", ""))
+    if not product_name:
+        return None
+
+    brand = _get_or_create_brand(_strip_html(item.get("brand", "")))
+    category = _get_default_category()
+    if not category:
+        return None
+
+    price_str = item.get("lprice", "") or ""
+    price = int(price_str) if price_str.isdigit() else None
+
+    product, _ = Product.objects.get_or_create(
+        product_name=product_name,
+        brand=brand,
+        defaults={
+            "category": category,
+            "image_url": item.get("image", ""),
+            "product_url": item.get("link", ""),
+            "price": price,
+        },
+    )
+    return product
 
 
 def _product_to_dict(item, like_count=None):
@@ -169,6 +245,14 @@ def product_search(request):
     ).order_by("product_id")[offset:offset + size]
 
     data = [_product_to_dict(p) for p in products]
+
+    # DB에 결과 없으면 네이버 API에서 가져와 저장
+    if not data and page == 1:
+        naver_items = _fetch_naver_products(keyword, display=size)
+        for item in naver_items:
+            product = _save_naver_item(item)
+            if product:
+                data.append(_product_to_dict(product))
 
     # 검색 로그 저장 (user_id 선택적)
     user_id = request.GET.get("user_id")
