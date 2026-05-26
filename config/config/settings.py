@@ -179,6 +179,9 @@ ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 NAVER_CLIENT_ID = os.environ.get('NAVER_CLIENT_ID', '')
 NAVER_CLIENT_SECRET = os.environ.get('NAVER_CLIENT_SECRET', '')
+CHATBOT_URL = os.environ.get('CHATBOT_URL', 'http://localhost:5000')
+KAKAO_REST_API_KEY = os.environ.get('KAKAO_REST_API_KEY', '')
+KAKAO_REDIRECT_URI = os.environ.get('KAKAO_REDIRECT_URI', 'http://localhost:8000/api/users/kakao/callback/')
 
 
 # ========================

@@ -6,6 +6,7 @@ class User(models.Model):
     email = models.EmailField(unique=True)
     password = models.CharField(max_length=255)
     nickname = models.CharField(max_length=100)
+    kakao_id = models.CharField(max_length=100, null=True, blank=True, unique=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

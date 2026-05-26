@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C /Users/jeonjooeun/DermaLens push -u origin main)"
+    ]
+  }
+}

@@ -18,13 +18,13 @@ import sys
 import time
 import urllib.parse
 import urllib.request
-import json
+import xml.etree.ElementTree as ET
 import logging
 
 # ── Django 설정 ──────────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE_DIR, "config"))
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "dermalens.settings")
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 
 import django
 django.setup()
@@ -46,14 +46,13 @@ BASE_URL = "https://apis.data.go.kr/1471000"
 INGREDIENT_SERVICE = "CsmtcsIngdCpntInfoService01"
 INGREDIENT_OPERATION = "getCsmtcsIngdCpntInfoService01"
 REGULATION_SERVICE = "CsmtcsReglMaterialInfoService"
-REGULATION_OPERATION = "getCsmtcsReglMaterialInfoService01"
+REGULATION_OPERATION = "getCsmtcsReglMaterialInfoService"
 
 PAGE_SIZE = 100
 REQUEST_DELAY = 0.3  # 공공데이터 TPS 제한 대응
 
 
-def fetch_json(url: str, params: dict, retries: int = 3) -> dict:
-    params["_type"] = "json"
+def fetch_xml(url: str, params: dict, retries: int = 3) -> ET.Element:
     query = urllib.parse.urlencode(params, quote_via=urllib.parse.quote)
     full_url = f"{url}?{query}"
 
@@ -61,7 +60,7 @@ def fetch_json(url: str, params: dict, retries: int = 3) -> dict:
         try:
             with urllib.request.urlopen(full_url, timeout=30) as resp:
                 raw = resp.read().decode("utf-8")
-            return json.loads(raw)
+            return ET.fromstring(raw)
         except Exception as exc:
             log.warning("요청 실패 (시도 %d/%d): %s — %s", attempt, retries, full_url, exc)
             if attempt < retries:
@@ -69,25 +68,21 @@ def fetch_json(url: str, params: dict, retries: int = 3) -> dict:
     raise RuntimeError(f"API 호출 반복 실패: {full_url}")
 
 
-def extract_items(data: dict) -> list[dict]:
-    """공공데이터 포털 공통 응답 구조에서 item 목록 추출."""
-    try:
-        body = data["response"]["body"]
-        items = body.get("items", {})
-        if not items:
-            return []
-        item = items.get("item", [])
-        if isinstance(item, dict):
-            return [item]
-        return item
-    except (KeyError, TypeError):
-        return []
+def extract_items(root: ET.Element) -> list[dict]:
+    """XML 응답에서 item 목록을 dict 리스트로 추출."""
+    items = root.findall(".//item")
+    result = []
+    for item in items:
+        d = {child.tag: (child.text or "").strip() for child in item}
+        result.append(d)
+    return result
 
 
-def total_count(data: dict) -> int:
+def total_count(root: ET.Element) -> int:
+    el = root.find(".//totalCount")
     try:
-        return int(data["response"]["body"]["totalCount"])
-    except (KeyError, TypeError, ValueError):
+        return int(el.text)
+    except (AttributeError, ValueError, TypeError):
         return 0
 
 
@@ -96,6 +91,7 @@ def total_count(data: dict) -> int:
 def seed_ingredients(api_key: str) -> tuple[int, int]:
     """
     원료성분정보 API를 전량 조회해 Ingredient + IngredientAlias 적재.
+    bulk_create로 페이지당 한 번에 insert.
     반환값: (inserted, updated)
     """
     url = f"{BASE_URL}/{INGREDIENT_SERVICE}/{INGREDIENT_OPERATION}"
@@ -112,61 +108,83 @@ def seed_ingredients(api_key: str) -> tuple[int, int]:
         }
 
         try:
-            data = fetch_json(url, params)
+            root = fetch_xml(url, params)
         except RuntimeError as e:
             log.error(str(e))
             break
 
-        items = extract_items(data)
+        items = extract_items(root)
         if not items:
             log.info("페이지 %d: 항목 없음 — 종료", page)
             break
 
         log.info("페이지 %d: %d개 항목 처리 중...", page, len(items))
 
+        # 페이지 데이터 파싱
+        parsed = []
+        for item in items:
+            kr_name = (item.get("INGR_KOR_NAME") or "").strip()
+            en_name = (item.get("INGR_ENG_NAME") or "").strip()
+            synonym = (item.get("INGR_SYNONYM") or "").strip()
+            if kr_name:
+                parsed.append((kr_name, en_name, synonym))
+
+        if not parsed:
+            page += 1
+            continue
+
+        kr_names = [p[0] for p in parsed]
+
         with transaction.atomic():
-            for item in items:
-                kr_name = (item.get("ingdCpntKrlNm") or "").strip()
-                en_name = (item.get("ingdCpntEngNm") or "").strip()
-                synonym = (item.get("ingdCpntSynonymNm") or "").strip()
+            # 기존 성분 한 번에 조회
+            existing_map = {
+                ing.ingredient_name_kr: ing
+                for ing in Ingredient.objects.filter(ingredient_name_kr__in=kr_names)
+            }
 
-                if not kr_name:
+            # 신규 성분만 bulk_create
+            new_objs = [
+                Ingredient(ingredient_name_kr=kr, ingredient_name_en=en or None)
+                for kr, en, _ in parsed
+                if kr not in existing_map
+            ]
+            if new_objs:
+                Ingredient.objects.bulk_create(new_objs, ignore_conflicts=True)
+                inserted += len(new_objs)
+            updated += len(existing_map)
+
+            # ID 포함해서 다시 조회
+            all_ing_map = {
+                ing.ingredient_name_kr: ing
+                for ing in Ingredient.objects.filter(ingredient_name_kr__in=kr_names)
+            }
+
+            # 기존 alias 한 번에 조회
+            existing_aliases = set(
+                IngredientAlias.objects.filter(
+                    ingredient_id__in=[i.ingredient_id for i in all_ing_map.values()]
+                ).values_list("ingredient_id", "alias_name")
+            )
+
+            # 신규 alias bulk_create
+            alias_objs = []
+            for kr, en, synonym in parsed:
+                ing = all_ing_map.get(kr)
+                if not ing:
                     continue
-
-                ingredient, created = Ingredient.objects.get_or_create(
-                    ingredient_name_kr=kr_name,
-                    defaults={"ingredient_name_en": en_name or None},
-                )
-
-                if created:
-                    inserted += 1
-                else:
-                    # 영문명이 없으면 채워줌
-                    if en_name and not ingredient.ingredient_name_en:
-                        ingredient.ingredient_name_en = en_name
-                        ingredient.save(update_fields=["ingredient_name_en"])
-                    updated += 1
-
-                # INCI alias (영문명)
-                if en_name:
-                    IngredientAlias.objects.get_or_create(
-                        ingredient=ingredient,
-                        alias_name=en_name,
-                        defaults={"alias_type": "INCI"},
-                    )
-
-                # SYNONYM alias
+                if en and len(en) <= 255 and (ing.ingredient_id, en) not in existing_aliases:
+                    alias_objs.append(IngredientAlias(ingredient=ing, alias_name=en, alias_type="INCI"))
                 if synonym:
                     for syn in synonym.split(","):
                         syn = syn.strip()
-                        if syn:
-                            IngredientAlias.objects.get_or_create(
-                                ingredient=ingredient,
-                                alias_name=syn,
-                                defaults={"alias_type": "SYNONYM"},
-                            )
+                        if syn and len(syn) <= 255 and (ing.ingredient_id, syn) not in existing_aliases:
+                            alias_objs.append(IngredientAlias(ingredient=ing, alias_name=syn, alias_type="SYNONYM"))
 
-        # 공공데이터 totalCount는 신뢰하기 어려우므로 항목 수로 판단
+            if alias_objs:
+                IngredientAlias.objects.bulk_create(alias_objs, ignore_conflicts=True)
+
+        log.info("페이지 %d 완료 — 신규: %d, 기존: %d", page, len(new_objs) if new_objs else 0, len(existing_map))
+
         if len(items) < PAGE_SIZE:
             log.info("마지막 페이지 도달 (페이지 %d)", page)
             break
@@ -218,12 +236,12 @@ def seed_regulations(api_key: str) -> tuple[int, int]:
         }
 
         try:
-            data = fetch_json(url, params)
+            root = fetch_xml(url, params)
         except RuntimeError as e:
             log.error(str(e))
             break
 
-        items = extract_items(data)
+        items = extract_items(root)
         if not items:
             log.info("페이지 %d: 항목 없음 — 종료", page)
             break
@@ -232,18 +250,17 @@ def seed_regulations(api_key: str) -> tuple[int, int]:
 
         with transaction.atomic():
             for item in items:
-                # 필드명은 API 버전에 따라 다를 수 있어 여러 후보 시도
                 raw_name = (
-                    item.get("reglMaterialNm")
-                    or item.get("ingdNm")
-                    or item.get("materialNm")
+                    item.get("INGR_KOR_NAME")
+                    or item.get("REGL_MATERIAL_NM")
+                    or item.get("INGD_NM")
                     or ""
                 ).strip()
 
                 regl_type = (
-                    item.get("reglTypNm")
-                    or item.get("reglType")
-                    or item.get("useLimitTypNm")
+                    item.get("USE_LIMIT_TYPE_NM")
+                    or item.get("REGL_TYP_NM")
+                    or item.get("REGL_TYPE")
                     or ""
                 )
 

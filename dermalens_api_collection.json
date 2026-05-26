@@ -1,0 +1,987 @@
+{
+  "client": "Thunder Client",
+  "collectionName": "DermaLens API",
+  "dateExported": "2026-05-25T00:00:00.000Z",
+  "version": "1.1",
+  "folders": [
+    {
+      "_id": "f-users",
+      "name": "Users (회원)",
+      "containerId": "",
+      "created": "2026-05-25T00:00:00.000Z",
+      "sortNum": 10000
+    },
+    {
+      "_id": "f-products",
+      "name": "Products (상품)",
+      "containerId": "",
+      "created": "2026-05-25T00:00:00.000Z",
+      "sortNum": 20000
+    },
+    {
+      "_id": "f-analysis",
+      "name": "Analysis (분석)",
+      "containerId": "",
+      "created": "2026-05-25T00:00:00.000Z",
+      "sortNum": 30000
+    },
+    {
+      "_id": "f-recommendation",
+      "name": "Recommendation (추천)",
+      "containerId": "",
+      "created": "2026-05-25T00:00:00.000Z",
+      "sortNum": 40000
+    },
+    {
+      "_id": "f-review",
+      "name": "Review (리뷰)",
+      "containerId": "",
+      "created": "2026-05-25T00:00:00.000Z",
+      "sortNum": 50000
+    }
+  ],
+  "requests": [
+    {
+      "_id": "req-health",
+      "colId": "dermalens",
+      "containerId": "",
+      "url": "https://dermalens-production.up.railway.app/health/",
+      "name": "Health Check",
+      "method": "GET",
+      "sortNum": 5000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [],
+      "params": [],
+      "body": { "type": "none", "raw": "", "form": [] },
+      "tests": []
+    },
+
+    {
+      "_id": "req-signup",
+      "colId": "dermalens",
+      "containerId": "f-users",
+      "url": "https://dermalens-production.up.railway.app/api/users/signup/",
+      "name": "회원가입",
+      "method": "POST",
+      "sortNum": 10000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [{ "name": "Content-Type", "value": "application/json" }],
+      "params": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"email\": \"test@test.com\",\n  \"password\": \"test1234\",\n  \"nickname\": \"테스트유저\"\n}",
+        "form": []
+      },
+      "tests": []
+    },
+    {
+      "_id": "req-check-email",
+      "colId": "dermalens",
+      "containerId": "f-users",
+      "url": "https://dermalens-production.up.railway.app/api/users/check-email/?email=test@test.com",
+      "name": "이메일 중복 확인",
+      "method": "GET",
+      "sortNum": 11000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [],
+      "params": [{ "name": "email", "value": "test@test.com" }],
+      "body": { "type": "none", "raw": "", "form": [] },
+      "tests": []
+    },
+    {
+      "_id": "req-login",
+      "colId": "dermalens",
+      "containerId": "f-users",
+      "url": "https://dermalens-production.up.railway.app/api/users/login/",
+      "name": "로그인 (토큰 자동저장)",
+      "method": "POST",
+      "sortNum": 12000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [{ "name": "Content-Type", "value": "application/json" }],
+      "params": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"email\": \"test@test.com\",\n  \"password\": \"test1234\"\n}",
+        "form": []
+      },
+      "tests": [
+        {
+          "type": "spt",
+          "custom": "var json = tc.response.json();\nif (json.tokens) {\n  tc.setVar(\"access_token\", json.tokens.access);\n  tc.setVar(\"refresh_token\", json.tokens.refresh);\n  tc.setVar(\"user_id\", String(json.user.user_id));\n}"
+        }
+      ]
+    },
+    {
+      "_id": "req-logout",
+      "colId": "dermalens",
+      "containerId": "f-users",
+      "url": "https://dermalens-production.up.railway.app/api/users/logout/",
+      "name": "로그아웃",
+      "method": "POST",
+      "sortNum": 13000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [{ "name": "Content-Type", "value": "application/json" }],
+      "params": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"refresh\": \"{{refresh_token}}\"\n}",
+        "form": []
+      },
+      "tests": []
+    },
+    {
+      "_id": "req-token-refresh",
+      "colId": "dermalens",
+      "containerId": "f-users",
+      "url": "https://dermalens-production.up.railway.app/api/users/token/refresh/",
+      "name": "토큰 갱신",
+      "method": "POST",
+      "sortNum": 14000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [{ "name": "Content-Type", "value": "application/json" }],
+      "params": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"refresh\": \"{{refresh_token}}\"\n}",
+        "form": []
+      },
+      "tests": []
+    },
+    {
+      "_id": "req-delete-account",
+      "colId": "dermalens",
+      "containerId": "f-users",
+      "url": "https://dermalens-production.up.railway.app/api/users/delete/1/",
+      "name": "회원 탈퇴",
+      "method": "DELETE",
+      "sortNum": 15000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{access_token}}" }],
+      "params": [],
+      "body": { "type": "none", "raw": "", "form": [] },
+      "tests": []
+    },
+    {
+      "_id": "req-user-profile",
+      "colId": "dermalens",
+      "containerId": "f-users",
+      "url": "https://dermalens-production.up.railway.app/api/users/profile/1/",
+      "name": "유저 프로필 조회",
+      "method": "GET",
+      "sortNum": 16000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{access_token}}" }],
+      "params": [],
+      "body": { "type": "none", "raw": "", "form": [] },
+      "tests": []
+    },
+    {
+      "_id": "req-update-nickname",
+      "colId": "dermalens",
+      "containerId": "f-users",
+      "url": "https://dermalens-production.up.railway.app/api/users/profile/1/nickname/",
+      "name": "닉네임 변경",
+      "method": "PATCH",
+      "sortNum": 17000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Authorization", "value": "Bearer {{access_token}}" }
+      ],
+      "params": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"nickname\": \"새닉네임\"\n}",
+        "form": []
+      },
+      "tests": []
+    },
+    {
+      "_id": "req-skin-profile",
+      "colId": "dermalens",
+      "containerId": "f-users",
+      "url": "https://dermalens-production.up.railway.app/api/users/skin-profile/1/",
+      "name": "피부 프로필 조회",
+      "method": "GET",
+      "sortNum": 18000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{access_token}}" }],
+      "params": [],
+      "body": { "type": "none", "raw": "", "form": [] },
+      "tests": []
+    },
+    {
+      "_id": "req-update-skin-profile",
+      "colId": "dermalens",
+      "containerId": "f-users",
+      "url": "https://dermalens-production.up.railway.app/api/users/skin-profile/1/update/",
+      "name": "피부 프로필 수정",
+      "method": "PATCH",
+      "sortNum": 19000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Authorization", "value": "Bearer {{access_token}}" }
+      ],
+      "params": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"skin_type_id\": 1,\n  \"sensitivity_level\": 3,\n  \"acne_prone_flag\": false,\n  \"preferred_texture_id\": 1,\n  \"concern_ids\": [1, 2],\n  \"allergy_ids\": []\n}",
+        "form": []
+      },
+      "tests": []
+    },
+    {
+      "_id": "req-survey",
+      "colId": "dermalens",
+      "containerId": "f-users",
+      "url": "https://dermalens-production.up.railway.app/api/users/survey/",
+      "name": "설문 저장",
+      "method": "POST",
+      "sortNum": 20000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Authorization", "value": "Bearer {{access_token}}" }
+      ],
+      "params": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"user_id\": 1,\n  \"selected_option_ids\": [1, 6, 12, 17, 24, 27, 30, 34, 36, 38]\n}",
+        "form": []
+      },
+      "tests": []
+    },
+    {
+      "_id": "req-mypage",
+      "colId": "dermalens",
+      "containerId": "f-users",
+      "url": "https://dermalens-production.up.railway.app/api/users/mypage/1/",
+      "name": "마이페이지",
+      "method": "GET",
+      "sortNum": 21000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{access_token}}" }],
+      "params": [],
+      "body": { "type": "none", "raw": "", "form": [] },
+      "tests": []
+    },
+    {
+      "_id": "req-mypage-likes",
+      "colId": "dermalens",
+      "containerId": "f-users",
+      "url": "https://dermalens-production.up.railway.app/api/users/mypage/1/likes/",
+      "name": "내 좋아요 목록",
+      "method": "GET",
+      "sortNum": 22000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{access_token}}" }],
+      "params": [],
+      "body": { "type": "none", "raw": "", "form": [] },
+      "tests": []
+    },
+    {
+      "_id": "req-mypage-reviews",
+      "colId": "dermalens",
+      "containerId": "f-users",
+      "url": "https://dermalens-production.up.railway.app/api/users/mypage/1/reviews/",
+      "name": "내 리뷰 목록",
+      "method": "GET",
+      "sortNum": 23000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{access_token}}" }],
+      "params": [],
+      "body": { "type": "none", "raw": "", "form": [] },
+      "tests": []
+    },
+    {
+      "_id": "req-mypage-analysis",
+      "colId": "dermalens",
+      "containerId": "f-users",
+      "url": "https://dermalens-production.up.railway.app/api/users/mypage/1/analysis/",
+      "name": "내 분석 기록",
+      "method": "GET",
+      "sortNum": 24000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{access_token}}" }],
+      "params": [],
+      "body": { "type": "none", "raw": "", "form": [] },
+      "tests": []
+    },
+    {
+      "_id": "req-mypage-recommendations",
+      "colId": "dermalens",
+      "containerId": "f-users",
+      "url": "https://dermalens-production.up.railway.app/api/users/mypage/1/recommendations/",
+      "name": "내 추천 목록",
+      "method": "GET",
+      "sortNum": 25000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{access_token}}" }],
+      "params": [],
+      "body": { "type": "none", "raw": "", "form": [] },
+      "tests": []
+    },
+    {
+      "_id": "req-kakao-login",
+      "colId": "dermalens",
+      "containerId": "f-users",
+      "url": "https://dermalens-production.up.railway.app/api/users/kakao/",
+      "name": "카카오 로그인 URL 요청",
+      "method": "GET",
+      "sortNum": 26000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [],
+      "params": [],
+      "body": { "type": "none", "raw": "", "form": [] },
+      "tests": []
+    },
+
+    {
+      "_id": "req-product-list",
+      "colId": "dermalens",
+      "containerId": "f-products",
+      "url": "https://dermalens-production.up.railway.app/api/products/",
+      "name": "상품 목록",
+      "method": "GET",
+      "sortNum": 10000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [],
+      "params": [
+        { "name": "page", "value": "1" },
+        { "name": "size", "value": "20" }
+      ],
+      "body": { "type": "none", "raw": "", "form": [] },
+      "tests": []
+    },
+    {
+      "_id": "req-product-search",
+      "colId": "dermalens",
+      "containerId": "f-products",
+      "url": "https://dermalens-production.up.railway.app/api/products/search/",
+      "name": "상품 검색",
+      "method": "GET",
+      "sortNum": 11000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [],
+      "params": [{ "name": "q", "value": "토너" }],
+      "body": { "type": "none", "raw": "", "form": [] },
+      "tests": []
+    },
+    {
+      "_id": "req-product-popular",
+      "colId": "dermalens",
+      "containerId": "f-products",
+      "url": "https://dermalens-production.up.railway.app/api/products/popular/",
+      "name": "인기 상품",
+      "method": "GET",
+      "sortNum": 12000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [],
+      "params": [],
+      "body": { "type": "none", "raw": "", "form": [] },
+      "tests": []
+    },
+    {
+      "_id": "req-product-detail",
+      "colId": "dermalens",
+      "containerId": "f-products",
+      "url": "https://dermalens-production.up.railway.app/api/products/1/",
+      "name": "상품 상세",
+      "method": "GET",
+      "sortNum": 13000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [],
+      "params": [],
+      "body": { "type": "none", "raw": "", "form": [] },
+      "tests": []
+    },
+    {
+      "_id": "req-product-ingredients",
+      "colId": "dermalens",
+      "containerId": "f-products",
+      "url": "https://dermalens-production.up.railway.app/api/products/1/ingredients/",
+      "name": "상품 성분 목록",
+      "method": "GET",
+      "sortNum": 14000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [],
+      "params": [],
+      "body": { "type": "none", "raw": "", "form": [] },
+      "tests": []
+    },
+    {
+      "_id": "req-category-list",
+      "colId": "dermalens",
+      "containerId": "f-products",
+      "url": "https://dermalens-production.up.railway.app/api/products/categories/",
+      "name": "카테고리 목록",
+      "method": "GET",
+      "sortNum": 15000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [],
+      "params": [],
+      "body": { "type": "none", "raw": "", "form": [] },
+      "tests": []
+    },
+    {
+      "_id": "req-product-by-category",
+      "colId": "dermalens",
+      "containerId": "f-products",
+      "url": "https://dermalens-production.up.railway.app/api/products/categories/5/",
+      "name": "카테고리별 상품 (토너)",
+      "method": "GET",
+      "sortNum": 16000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [],
+      "params": [],
+      "body": { "type": "none", "raw": "", "form": [] },
+      "tests": []
+    },
+    {
+      "_id": "req-ingredient-list",
+      "colId": "dermalens",
+      "containerId": "f-products",
+      "url": "https://dermalens-production.up.railway.app/api/products/ingredients/",
+      "name": "성분 목록",
+      "method": "GET",
+      "sortNum": 17000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [],
+      "params": [{ "name": "page", "value": "1" }],
+      "body": { "type": "none", "raw": "", "form": [] },
+      "tests": []
+    },
+    {
+      "_id": "req-ingredient-search",
+      "colId": "dermalens",
+      "containerId": "f-products",
+      "url": "https://dermalens-production.up.railway.app/api/products/ingredients/search/",
+      "name": "성분 검색",
+      "method": "GET",
+      "sortNum": 18000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [],
+      "params": [{ "name": "q", "value": "나이아신아마이드" }],
+      "body": { "type": "none", "raw": "", "form": [] },
+      "tests": []
+    },
+    {
+      "_id": "req-ingredient-detail",
+      "colId": "dermalens",
+      "containerId": "f-products",
+      "url": "https://dermalens-production.up.railway.app/api/products/ingredients/1/",
+      "name": "성분 상세",
+      "method": "GET",
+      "sortNum": 19000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [],
+      "params": [],
+      "body": { "type": "none", "raw": "", "form": [] },
+      "tests": []
+    },
+
+    {
+      "_id": "req-upload-image",
+      "colId": "dermalens",
+      "containerId": "f-analysis",
+      "url": "https://dermalens-production.up.railway.app/api/analysis/upload-image/",
+      "name": "OCR 이미지 업로드 (multipart)",
+      "method": "POST",
+      "sortNum": 10000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [],
+      "params": [],
+      "body": {
+        "type": "formdata",
+        "raw": "",
+        "form": [
+          { "name": "user_id", "value": "1", "type": "text" },
+          { "name": "product_id", "value": "1", "type": "text" },
+          { "name": "image_type", "value": "ingredient_label", "type": "text" },
+          { "name": "image", "value": "", "type": "file" }
+        ]
+      },
+      "tests": []
+    },
+    {
+      "_id": "req-ocr-result",
+      "colId": "dermalens",
+      "containerId": "f-analysis",
+      "url": "https://dermalens-production.up.railway.app/api/analysis/ocr-result/",
+      "name": "OCR 결과 저장",
+      "method": "POST",
+      "sortNum": 11000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [{ "name": "Content-Type", "value": "application/json" }],
+      "params": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"user_id\": 1,\n  \"product_id\": 1,\n  \"raw_text\": \"정제수, 나이아신아마이드, 글리세린, 판테놀\",\n  \"ingredients\": [\"정제수\", \"나이아신아마이드\", \"글리세린\", \"판테놀\"],\n  \"ocr_confidence\": 0.95\n}",
+        "form": []
+      },
+      "tests": []
+    },
+    {
+      "_id": "req-analyze-product",
+      "colId": "dermalens",
+      "containerId": "f-analysis",
+      "url": "https://dermalens-production.up.railway.app/api/analysis/analyze-product/",
+      "name": "제품 성분 분석",
+      "method": "POST",
+      "sortNum": 12000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Authorization", "value": "Bearer {{access_token}}" }
+      ],
+      "params": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"user_id\": 1,\n  \"product_id\": 1\n}",
+        "form": []
+      },
+      "tests": []
+    },
+    {
+      "_id": "req-analysis-detail",
+      "colId": "dermalens",
+      "containerId": "f-analysis",
+      "url": "https://dermalens-production.up.railway.app/api/analysis/detail/1/",
+      "name": "분석 결과 상세",
+      "method": "GET",
+      "sortNum": 13000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{access_token}}" }],
+      "params": [],
+      "body": { "type": "none", "raw": "", "form": [] },
+      "tests": []
+    },
+    {
+      "_id": "req-analysis-history",
+      "colId": "dermalens",
+      "containerId": "f-analysis",
+      "url": "https://dermalens-production.up.railway.app/api/analysis/history/1/",
+      "name": "분석 기록 목록",
+      "method": "GET",
+      "sortNum": 14000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{access_token}}" }],
+      "params": [],
+      "body": { "type": "none", "raw": "", "form": [] },
+      "tests": []
+    },
+    {
+      "_id": "req-chat-start",
+      "colId": "dermalens",
+      "containerId": "f-analysis",
+      "url": "https://dermalens-production.up.railway.app/api/analysis/chat/start/",
+      "name": "채팅 세션 시작",
+      "method": "POST",
+      "sortNum": 15000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [{ "name": "Content-Type", "value": "application/json" }],
+      "params": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"user_id\": 1\n}",
+        "form": []
+      },
+      "tests": [
+        {
+          "type": "spt",
+          "custom": "var json = tc.response.json();\nif (json.session_id) { tc.setVar(\"session_id\", String(json.session_id)); }"
+        }
+      ]
+    },
+    {
+      "_id": "req-chat-message",
+      "colId": "dermalens",
+      "containerId": "f-analysis",
+      "url": "https://dermalens-production.up.railway.app/api/analysis/chat/message/",
+      "name": "채팅 메시지 전송",
+      "method": "POST",
+      "sortNum": 16000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [{ "name": "Content-Type", "value": "application/json" }],
+      "params": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"user_id\": 1,\n  \"session_id\": 1,\n  \"message\": \"지성 피부에 좋은 토너 추천해줘\"\n}",
+        "form": []
+      },
+      "tests": []
+    },
+    {
+      "_id": "req-chat-history",
+      "colId": "dermalens",
+      "containerId": "f-analysis",
+      "url": "https://dermalens-production.up.railway.app/api/analysis/chat/history/1/",
+      "name": "채팅 기록 조회",
+      "method": "GET",
+      "sortNum": 17000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [],
+      "params": [],
+      "body": { "type": "none", "raw": "", "form": [] },
+      "tests": []
+    },
+    {
+      "_id": "req-chat-sessions",
+      "colId": "dermalens",
+      "containerId": "f-analysis",
+      "url": "https://dermalens-production.up.railway.app/api/analysis/chat/sessions/1/",
+      "name": "유저 채팅 세션 목록",
+      "method": "GET",
+      "sortNum": 18000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [],
+      "params": [],
+      "body": { "type": "none", "raw": "", "form": [] },
+      "tests": []
+    },
+    {
+      "_id": "req-chat",
+      "colId": "dermalens",
+      "containerId": "f-analysis",
+      "url": "https://dermalens-production.up.railway.app/api/analysis/chat/",
+      "name": "챗봇 (통합 엔드포인트)",
+      "method": "POST",
+      "sortNum": 19000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [{ "name": "Content-Type", "value": "application/json" }],
+      "params": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"user_id\": 1,\n  \"message\": \"지성 피부에 좋은 토너 추천해줘\"\n}",
+        "form": []
+      },
+      "tests": []
+    },
+
+    {
+      "_id": "req-rec-generate",
+      "colId": "dermalens",
+      "containerId": "f-recommendation",
+      "url": "https://dermalens-production.up.railway.app/api/recommendation/generate/",
+      "name": "추천 생성",
+      "method": "POST",
+      "sortNum": 10000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Authorization", "value": "Bearer {{access_token}}" }
+      ],
+      "params": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"user_id\": 1,\n  \"top_n\": 10\n}",
+        "form": []
+      },
+      "tests": []
+    },
+    {
+      "_id": "req-rec-list",
+      "colId": "dermalens",
+      "containerId": "f-recommendation",
+      "url": "https://dermalens-production.up.railway.app/api/recommendation/user/1/",
+      "name": "유저 추천 목록",
+      "method": "GET",
+      "sortNum": 11000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{access_token}}" }],
+      "params": [],
+      "body": { "type": "none", "raw": "", "form": [] },
+      "tests": []
+    },
+    {
+      "_id": "req-rec-save",
+      "colId": "dermalens",
+      "containerId": "f-recommendation",
+      "url": "https://dermalens-production.up.railway.app/api/recommendation/save/",
+      "name": "추천 저장",
+      "method": "POST",
+      "sortNum": 12000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Authorization", "value": "Bearer {{access_token}}" }
+      ],
+      "params": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"user_id\": 1,\n  \"product_id\": 1,\n  \"score\": 8.5,\n  \"reason\": \"지성 피부에 적합한 수분 토너\",\n  \"rank_order\": 1\n}",
+        "form": []
+      },
+      "tests": []
+    },
+    {
+      "_id": "req-like-toggle",
+      "colId": "dermalens",
+      "containerId": "f-recommendation",
+      "url": "https://dermalens-production.up.railway.app/api/recommendation/like/",
+      "name": "좋아요 토글",
+      "method": "POST",
+      "sortNum": 13000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Authorization", "value": "Bearer {{access_token}}" }
+      ],
+      "params": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"user_id\": 1,\n  \"product_id\": 1\n}",
+        "form": []
+      },
+      "tests": []
+    },
+    {
+      "_id": "req-like-status",
+      "colId": "dermalens",
+      "containerId": "f-recommendation",
+      "url": "https://dermalens-production.up.railway.app/api/recommendation/like/1/1/",
+      "name": "좋아요 상태 확인",
+      "method": "GET",
+      "sortNum": 14000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{access_token}}" }],
+      "params": [],
+      "body": { "type": "none", "raw": "", "form": [] },
+      "tests": []
+    },
+
+    {
+      "_id": "req-review-create",
+      "colId": "dermalens",
+      "containerId": "f-review",
+      "url": "https://dermalens-production.up.railway.app/api/review/",
+      "name": "리뷰 작성",
+      "method": "POST",
+      "sortNum": 10000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Authorization", "value": "Bearer {{access_token}}" }
+      ],
+      "params": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"user_id\": 1,\n  \"product_id\": 1,\n  \"rating\": 4,\n  \"review_text\": \"수분감이 좋고 자극이 없어요.\"\n}",
+        "form": []
+      },
+      "tests": []
+    },
+    {
+      "_id": "req-review-update",
+      "colId": "dermalens",
+      "containerId": "f-review",
+      "url": "https://dermalens-production.up.railway.app/api/review/1/update/",
+      "name": "리뷰 수정",
+      "method": "PATCH",
+      "sortNum": 11000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Authorization", "value": "Bearer {{access_token}}" }
+      ],
+      "params": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"user_id\": 1,\n  \"rating\": 5,\n  \"review_text\": \"재구매 의사 있어요!\"\n}",
+        "form": []
+      },
+      "tests": []
+    },
+    {
+      "_id": "req-review-delete",
+      "colId": "dermalens",
+      "containerId": "f-review",
+      "url": "https://dermalens-production.up.railway.app/api/review/1/delete/",
+      "name": "리뷰 삭제",
+      "method": "DELETE",
+      "sortNum": 12000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Authorization", "value": "Bearer {{access_token}}" }
+      ],
+      "params": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"user_id\": 1\n}",
+        "form": []
+      },
+      "tests": []
+    },
+    {
+      "_id": "req-review-by-product",
+      "colId": "dermalens",
+      "containerId": "f-review",
+      "url": "https://dermalens-production.up.railway.app/api/review/product/1/",
+      "name": "상품별 리뷰 목록",
+      "method": "GET",
+      "sortNum": 13000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [],
+      "params": [],
+      "body": { "type": "none", "raw": "", "form": [] },
+      "tests": []
+    },
+    {
+      "_id": "req-review-by-user",
+      "colId": "dermalens",
+      "containerId": "f-review",
+      "url": "https://dermalens-production.up.railway.app/api/review/user/1/",
+      "name": "유저별 리뷰 목록",
+      "method": "GET",
+      "sortNum": 14000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{access_token}}" }],
+      "params": [],
+      "body": { "type": "none", "raw": "", "form": [] },
+      "tests": []
+    },
+    {
+      "_id": "req-feedback-create",
+      "colId": "dermalens",
+      "containerId": "f-review",
+      "url": "https://dermalens-production.up.railway.app/api/review/feedback/",
+      "name": "앱 피드백 작성",
+      "method": "POST",
+      "sortNum": 15000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Authorization", "value": "Bearer {{access_token}}" }
+      ],
+      "params": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"user_id\": 1,\n  \"feedback_type\": \"SUGGESTION\",\n  \"content\": \"앱이 편리해요!\"\n}",
+        "form": []
+      },
+      "tests": []
+    },
+    {
+      "_id": "req-feedback-list",
+      "colId": "dermalens",
+      "containerId": "f-review",
+      "url": "https://dermalens-production.up.railway.app/api/review/feedback/1/",
+      "name": "피드백 목록",
+      "method": "GET",
+      "sortNum": 16000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{access_token}}" }],
+      "params": [],
+      "body": { "type": "none", "raw": "", "form": [] },
+      "tests": []
+    },
+    {
+      "_id": "req-search-log",
+      "colId": "dermalens",
+      "containerId": "f-review",
+      "url": "https://dermalens-production.up.railway.app/api/review/search-log/",
+      "name": "검색 기록 저장",
+      "method": "POST",
+      "sortNum": 17000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [{ "name": "Content-Type", "value": "application/json" }],
+      "params": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"user_id\": 1,\n  \"query\": \"나이아신아마이드\",\n  \"search_type\": \"PRODUCT\"\n}",
+        "form": []
+      },
+      "tests": []
+    },
+    {
+      "_id": "req-search-history",
+      "colId": "dermalens",
+      "containerId": "f-review",
+      "url": "https://dermalens-production.up.railway.app/api/review/search-history/1/",
+      "name": "검색 기록 조회",
+      "method": "GET",
+      "sortNum": 18000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{access_token}}" }],
+      "params": [],
+      "body": { "type": "none", "raw": "", "form": [] },
+      "tests": []
+    },
+    {
+      "_id": "req-sync-history",
+      "colId": "dermalens",
+      "containerId": "f-review",
+      "url": "https://dermalens-production.up.railway.app/api/review/sync-history/",
+      "name": "히스토리 동기화",
+      "method": "POST",
+      "sortNum": 19000,
+      "created": "2026-05-25T00:00:00.000Z",
+      "modified": "2026-05-25T00:00:00.000Z",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Authorization", "value": "Bearer {{access_token}}" }
+      ],
+      "params": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"user_id\": 1,\n  \"product_ids\": [1, 2, 3]\n}",
+        "form": []
+      },
+      "tests": []
+    }
+  ]
+}

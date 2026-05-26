@@ -1,10 +1,12 @@
 import json
 import os
+import urllib.request
+import urllib.error
 
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET
-from django.db.models import Q
+from django.db.models import Q, Avg
 from django.conf import settings
 
 from products.models import Ingredient, IngredientAlias, ProductIngredient
@@ -697,3 +699,171 @@ def user_sessions(request, user_id):
         {"success": True, "count": len(data), "sessions": data},
         json_dumps_params={"ensure_ascii": False},
     )
+
+
+# =====================
+# 챗봇 서버 연동 (POST /api/chat/)
+# =====================
+
+def _call_chatbot_server(message: str) -> dict | None:
+    """챗봇 서버(CHATBOT_URL/chat)에 메시지 전달 후 intent/keywords 반환."""
+    chatbot_url = getattr(settings, "CHATBOT_URL", "http://localhost:5000")
+    url = f"{chatbot_url}/chat"
+    payload = json.dumps({"message": message}).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return None
+
+
+def _build_chat_response(chatbot_resp: dict, user_id: int | None) -> dict:
+    """챗봇 서버 응답 + DB 조회 결과를 합쳐 최종 응답 구성."""
+    intent = chatbot_resp.get("intent", "UNKNOWN")
+    keywords = chatbot_resp.get("keywords", {})
+    message = chatbot_resp.get("message", "")
+    components = list(chatbot_resp.get("components", []))
+    quick_replies = list(chatbot_resp.get("quickReplies", []))
+
+    from products.models import Product
+    from review.models import Review
+
+    if intent == "PRODUCT_RECOMMEND":
+        category_name = keywords.get("category", "")
+
+        qs = Product.objects.select_related("brand", "category")
+        if category_name:
+            qs = qs.filter(category__category_name__icontains=category_name)
+        products = qs.order_by("product_id")[:5]
+
+        for p in products:
+            components.append({
+                "type": "card",
+                "product_id": p.product_id,
+                "title": p.product_name,
+                "description": p.brand.brand_name_kr if p.brand else "",
+                "image_url": p.image_url,
+                "price": p.price,
+                "riskLevel": "LOW",
+                "buttonText": "제품 상세보기",
+            })
+        if not quick_replies:
+            quick_replies = ["성분 분석", "피부 진단"]
+
+    elif intent in ("INGREDIENT_RISK", "INGREDIENT_ANALYSIS"):
+        ing_name = keywords.get("ingredient", "")
+        if ing_name:
+            ing = _match_ingredient(ing_name)
+            if ing:
+                risk = ing.risk_level or 0
+                risk_label = "HIGH" if risk >= 7 else ("MEDIUM" if risk >= 4 else "LOW")
+                components.append({
+                    "type": "card",
+                    "title": ing.ingredient_name_kr,
+                    "description": ing.description or ing.ingredient_name_en or "",
+                    "riskLevel": risk_label,
+                    "allergy_flag": ing.allergy_flag,
+                    "irritant_flag": ing.irritant_flag,
+                    "acne_caution_flag": ing.acne_caution_flag,
+                    "moisturizing_flag": ing.moisturizing_flag,
+                    "soothing_flag": ing.soothing_flag,
+                    "buttonText": "성분 상세보기",
+                })
+        if not quick_replies:
+            quick_replies = ["제품 추천", "피부 진단"]
+
+    elif intent == "SKIN_TYPE_TEST":
+        components.append({
+            "type": "link",
+            "label": "피부 진단 시작하기",
+            "url": "/survey",
+        })
+        if not quick_replies:
+            quick_replies = ["제품 추천", "성분 분석"]
+
+    elif intent == "REVIEW_SUMMARY":
+        product_name = keywords.get("product", "") or keywords.get("category", "")
+        if product_name:
+            product = Product.objects.filter(product_name__icontains=product_name).first()
+            if product:
+                avg = Review.objects.filter(product=product).aggregate(avg=Avg("rating"))["avg"]
+                count = Review.objects.filter(product=product).count()
+                components.append({
+                    "type": "card",
+                    "title": product.product_name,
+                    "description": f"평균 평점: {round(avg, 1) if avg else '없음'} / 리뷰 {count}개",
+                    "riskLevel": "LOW",
+                    "buttonText": "리뷰 전체보기",
+                })
+        if not quick_replies:
+            quick_replies = ["제품 추천", "성분 분석"]
+
+    elif intent == "ANALYSIS_HISTORY" and user_id:
+        recent = AnalysisResult.objects.filter(user_id=user_id).order_by("-created_at").first()
+        if recent:
+            risk = recent.risk_score or 0
+            risk_label = "HIGH" if risk >= 7 else ("MEDIUM" if risk >= 4 else "LOW")
+            components.append({
+                "type": "card",
+                "title": "최근 분석 결과",
+                "description": recent.summary or "",
+                "riskLevel": risk_label,
+                "buttonText": "분석 상세보기",
+            })
+        if not quick_replies:
+            quick_replies = ["제품 추천", "성분 분석"]
+
+    else:  # UNKNOWN
+        if not quick_replies:
+            quick_replies = ["제품 추천", "성분 분석", "피부 진단"]
+
+    return {
+        "intent": intent,
+        "score": chatbot_resp.get("score", 0),
+        "keywords": keywords,
+        "message": message,
+        "components": components,
+        "quickReplies": quick_replies,
+    }
+
+
+@csrf_exempt
+def chat(request):
+    """
+    프론트 → 백엔드 챗봇 중계 엔드포인트.
+    챗봇 서버에 intent/keywords 요청 후 DB 조회 결과를 합쳐 반환.
+    """
+    if request.method != "POST":
+        return JsonResponse({"success": False, "message": "POST 요청만 허용됩니다."}, status=405)
+
+    try:
+        data = json.loads(request.body.decode("utf-8"))
+    except json.JSONDecodeError:
+        return JsonResponse({"success": False, "message": "JSON 형식이 올바르지 않습니다."}, status=400)
+
+    message = data.get("message", "").strip()
+    user_id = data.get("user_id")
+
+    if not message:
+        return JsonResponse({"success": False, "message": "message가 필요합니다."}, status=400)
+
+    chatbot_resp = _call_chatbot_server(message)
+
+    if chatbot_resp is None:
+        # 챗봇 서버 미응답 시 fallback
+        return JsonResponse({
+            "intent": "UNKNOWN",
+            "score": 0,
+            "keywords": {},
+            "message": "현재 챗봇 서버에 연결할 수 없습니다. 잠시 후 다시 시도해주세요.",
+            "components": [],
+            "quickReplies": ["제품 추천", "성분 분석", "피부 진단"],
+        }, json_dumps_params={"ensure_ascii": False})
+
+    response = _build_chat_response(chatbot_resp, user_id)
+    return JsonResponse(response, json_dumps_params={"ensure_ascii": False})

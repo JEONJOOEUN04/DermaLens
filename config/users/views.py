@@ -1,9 +1,12 @@
 import json
+import urllib.request
+import urllib.parse
 
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET
 from django.contrib.auth.hashers import make_password, check_password
+from django.conf import settings
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import (
@@ -572,6 +575,105 @@ def my_analysis_history(request, user_id):
     ]
     return JsonResponse(
         {"success": True, "page": page, "count": len(data), "history": data},
+        json_dumps_params={"ensure_ascii": False},
+    )
+
+
+# =====================
+# 카카오 로그인
+# =====================
+
+@require_GET
+def kakao_login(request):
+    """카카오 인증 페이지 URL 반환."""
+    kakao_auth_url = "https://kauth.kakao.com/oauth/authorize?" + urllib.parse.urlencode({
+        "client_id": settings.KAKAO_REST_API_KEY,
+        "redirect_uri": settings.KAKAO_REDIRECT_URI,
+        "response_type": "code",
+    })
+    return JsonResponse({"success": True, "auth_url": kakao_auth_url})
+
+
+@require_GET
+def kakao_callback(request):
+    """카카오 인증 코드 → 토큰 → 유저 정보 → JWT 발급."""
+    code = request.GET.get("code")
+    if not code:
+        return JsonResponse({"success": False, "message": "인증 코드가 없습니다."}, status=400)
+
+    # 1. 카카오 액세스 토큰 발급
+    token_data = urllib.parse.urlencode({
+        "grant_type": "authorization_code",
+        "client_id": settings.KAKAO_REST_API_KEY,
+        "redirect_uri": settings.KAKAO_REDIRECT_URI,
+        "code": code,
+    }).encode("utf-8")
+
+    token_req = urllib.request.Request(
+        "https://kauth.kakao.com/oauth/token",
+        data=token_data,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(token_req, timeout=10) as resp:
+            token_resp = json.loads(resp.read().decode("utf-8"))
+    except Exception as e:
+        return JsonResponse({"success": False, "message": f"카카오 토큰 요청 실패: {e}"}, status=502)
+
+    kakao_access_token = token_resp.get("access_token")
+    if not kakao_access_token:
+        return JsonResponse({"success": False, "message": "액세스 토큰 발급 실패"}, status=502)
+
+    # 2. 카카오 유저 정보 조회
+    user_info_req = urllib.request.Request(
+        "https://kapi.kakao.com/v2/user/me",
+        headers={"Authorization": f"Bearer {kakao_access_token}"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(user_info_req, timeout=10) as resp:
+            user_info = json.loads(resp.read().decode("utf-8"))
+    except Exception as e:
+        return JsonResponse({"success": False, "message": f"카카오 유저 정보 요청 실패: {e}"}, status=502)
+
+    kakao_id = str(user_info.get("id", ""))
+    kakao_account = user_info.get("kakao_account", {})
+    email = kakao_account.get("email") or f"kakao_{kakao_id}@kakao.placeholder"
+    nickname = (
+        kakao_account.get("profile", {}).get("nickname")
+        or f"kakao_{kakao_id[:6]}"
+    )
+
+    # 3. 유저 조회 또는 생성
+    user = User.objects.filter(kakao_id=kakao_id).first()
+    is_new = False
+
+    if not user:
+        user = User.objects.filter(email=email).first()
+        if user:
+            # 기존 일반 가입 유저 → kakao_id 연결
+            user.kakao_id = kakao_id
+            user.save()
+        else:
+            # 신규 가입
+            user = User.objects.create(
+                email=email,
+                password=make_password(None),  # 카카오 유저는 비밀번호 없음
+                nickname=nickname,
+                kakao_id=kakao_id,
+            )
+            UserSkinProfile.objects.create(user=user)
+            is_new = True
+
+    tokens = _get_tokens(user)
+    return JsonResponse(
+        {
+            "success": True,
+            "is_new_user": is_new,
+            "user": _user_to_dict(user),
+            "tokens": tokens,
+        },
         json_dumps_params={"ensure_ascii": False},
     )
 

@@ -11,4 +11,5 @@ urlpatterns = [
     path("chat/message/", views.chat_message),
     path("chat/history/<int:session_id>/", views.chat_history),
     path("chat/sessions/<int:user_id>/", views.user_sessions),
+    path("chat/", views.chat),
 ]
