@@ -702,6 +702,61 @@ def user_sessions(request, user_id):
 
 
 # =====================
+# OCR 서버 연동
+# =====================
+
+@csrf_exempt
+def request_ocr(request):
+    """프론트 → 백엔드: 이미지 받아 OCR 서버로 전달 후 결과 반환."""
+    if request.method != "POST":
+        return JsonResponse({"success": False, "message": "POST 요청만 허용됩니다."}, status=405)
+
+    user_id = request.POST.get("user_id")
+    image_url = request.POST.get("image_url", "")
+    image_file = request.FILES.get("image")
+
+    if not user_id:
+        return JsonResponse({"success": False, "message": "user_id가 필요합니다."}, status=400)
+
+    # 이미지 파일 업로드된 경우 저장 후 URL 생성
+    if image_file and not image_url:
+        upload_dir = os.path.join(settings.MEDIA_ROOT, "ocr_images")
+        os.makedirs(upload_dir, exist_ok=True)
+        file_name = f"user{user_id}_{image_file.name}"
+        file_path = os.path.join(upload_dir, file_name)
+        with open(file_path, "wb") as f:
+            for chunk in image_file.chunks():
+                f.write(chunk)
+        base_url = getattr(settings, "BASE_URL", "https://dermalens-production.up.railway.app")
+        image_url = f"{base_url}{settings.MEDIA_URL}ocr_images/{file_name}"
+
+    if not image_url:
+        return JsonResponse({"success": False, "message": "image_url 또는 image 파일이 필요합니다."}, status=400)
+
+    ocr_server_url = getattr(settings, "OCR_SERVER_URL", "https://web-production-38634.up.railway.app")
+    payload = json.dumps({"user_id": str(user_id), "image_url": image_url}).encode("utf-8")
+    req = urllib.request.Request(
+        f"{ocr_server_url}/ocr",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            ocr_resp = json.loads(resp.read().decode("utf-8"))
+        return JsonResponse(
+            {"success": True, "message": "OCR 분석이 완료되었습니다.", "result": ocr_resp},
+            json_dumps_params={"ensure_ascii": False},
+        )
+    except Exception:
+        return JsonResponse(
+            {"success": False, "message": "OCR 서버 연결에 실패했습니다."},
+            status=502,
+            json_dumps_params={"ensure_ascii": False},
+        )
+
+
+# =====================
 # 챗봇 서버 연동 (POST /api/chat/)
 # =====================
 

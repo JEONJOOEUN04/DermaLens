@@ -3,6 +3,7 @@ from . import views
 
 urlpatterns = [
     path("upload-image/", views.upload_ocr_image),
+    path("request-ocr/", views.request_ocr),
     path("ocr-result/", views.save_ocr_result),
     path("analyze-product/", views.analyze_product),
     path("detail/<int:analysis_id>/", views.analysis_detail),
