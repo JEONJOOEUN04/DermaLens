@@ -945,6 +945,22 @@ def chat(request):
     if not message:
         return JsonResponse({"success": False, "message": "message가 필요합니다."}, status=400)
 
+    # 세션 처리
+    session_id = data.get("session_id")
+    session = None
+    if user_id:
+        if session_id:
+            session = ChatSession.objects.filter(session_id=session_id, user_id=user_id).first()
+        if not session:
+            session = ChatSession.objects.create(user_id=user_id)
+
+    # 유저 메시지 저장
+    if session:
+        ChatMessage.objects.create(
+            session=session, user_id=user_id,
+            message_type="USER", content=message,
+        )
+
     # 챗봇이 intent+keywords 직접 전달한 경우 → 챗봇 서버 호출 생략
     if intent:
         chatbot_resp = {
@@ -969,4 +985,14 @@ def chat(request):
         }, json_dumps_params={"ensure_ascii": False})
 
     response = _build_chat_response(chatbot_resp, user_id)
+
+    # 봇 응답 저장
+    if session:
+        ChatMessage.objects.create(
+            session=session, user_id=user_id,
+            message_type="BOT", content=response.get("message", ""),
+            intent=response.get("intent"),
+        )
+        response["session_id"] = session.session_id
+
     return JsonResponse(response, json_dumps_params={"ensure_ascii": False})
