@@ -154,3 +154,17 @@ class SurveyOption(models.Model):
 
     def __str__(self):
         return self.option_text
+
+
+class UserNotification(models.Model):
+    notification_id = models.AutoField(primary_key=True)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, db_column='user_id')
+    type = models.CharField(max_length=50, default='OCR_COMPLETE')
+    message = models.CharField(max_length=255)
+    is_read = models.BooleanField(default=False)
+    related_id = models.IntegerField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'UserNotification'
+        ordering = ['-created_at']

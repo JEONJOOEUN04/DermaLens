@@ -12,7 +12,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from .models import (
     User, UserSkinProfile, SurveyResponse,
     SkinTypeMaster, TextureMaster, AllergyMaster, SkinConcernMaster,
-    UserSkinConcern, UserAllergy,
+    UserSkinConcern, UserAllergy, UserNotification,
 )
 
 
@@ -703,3 +703,53 @@ def my_recommendations(request, user_id):
         {"success": True, "page": page, "count": len(data), "recommendations": data},
         json_dumps_params={"ensure_ascii": False},
     )
+
+
+# =====================
+# 알림
+# =====================
+
+@require_GET
+def notifications(request, user_id):
+    """읽지 않은 알림 수 + 목록 반환."""
+    nots = UserNotification.objects.filter(user_id=user_id).order_by("-created_at")[:50]
+    data = [
+        {
+            "notification_id": n.notification_id,
+            "type": n.type,
+            "message": n.message,
+            "is_read": n.is_read,
+            "related_id": n.related_id,
+            "created_at": str(n.created_at),
+        }
+        for n in nots
+    ]
+    unread_count = sum(1 for n in data if not n["is_read"])
+    return JsonResponse(
+        {"success": True, "unread_count": unread_count, "notifications": data},
+        json_dumps_params={"ensure_ascii": False},
+    )
+
+
+@csrf_exempt
+def mark_notification_read(request, notification_id):
+    """알림 단건 읽음 처리."""
+    if request.method not in ("PATCH", "POST"):
+        return JsonResponse({"success": False, "message": "PATCH 요청만 허용됩니다."}, status=405)
+    try:
+        n = UserNotification.objects.get(notification_id=notification_id)
+        n.is_read = True
+        n.save()
+        return JsonResponse({"success": True}, json_dumps_params={"ensure_ascii": False})
+    except UserNotification.DoesNotExist:
+        return JsonResponse({"success": False, "message": "알림을 찾을 수 없습니다."}, status=404,
+                            json_dumps_params={"ensure_ascii": False})
+
+
+@csrf_exempt
+def mark_all_read(request, user_id):
+    """전체 읽음 처리."""
+    if request.method not in ("DELETE", "POST", "PATCH"):
+        return JsonResponse({"success": False, "message": "잘못된 요청입니다."}, status=405)
+    UserNotification.objects.filter(user_id=user_id, is_read=False).update(is_read=True)
+    return JsonResponse({"success": True, "message": "전체 읽음 처리 완료"}, json_dumps_params={"ensure_ascii": False})

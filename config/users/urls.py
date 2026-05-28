@@ -21,4 +21,7 @@ urlpatterns = [
     path("mypage/<int:user_id>/recommendations/", views.my_recommendations),
     path("kakao/", views.kakao_login),
     path("kakao/callback/", views.kakao_callback),
+    path("notifications/<int:user_id>/", views.notifications),
+    path("notifications/<int:notification_id>/read/", views.mark_notification_read),
+    path("notifications/read-all/<int:user_id>/", views.mark_all_read),
 ]

@@ -258,6 +258,21 @@ def save_ocr_result(request):
     analysis.summary = risk_summary["summary"]
     analysis.save()
 
+    # OCR 완료 알림 생성
+    try:
+        from users.models import UserNotification
+        product_label = analysis.product_name or "성분"
+        traffic = risk_summary["traffic_light"]
+        label_map = {"GREEN": "안전", "YELLOW": "주의", "RED": "위험"}
+        UserNotification.objects.create(
+            user_id=user_id,
+            type="OCR_COMPLETE",
+            message=f"{product_label} 분석 완료 · {label_map.get(traffic, traffic)}",
+            related_id=analysis.analysis_id,
+        )
+    except Exception:
+        pass
+
     matched_output = [
         {
             "detected_text": item["detected_text"],
