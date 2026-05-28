@@ -194,6 +194,11 @@ def save_ocr_result(request):
     ingredients = data.get("ingredients", [])
     ocr_confidence = data.get("ocr_confidence")
     ocr_image_id = data.get("ocr_image_id")
+    product_name = data.get("product_name")
+    capacity = data.get("capacity")
+    usage = data.get("usage")
+    cautions = data.get("cautions")
+    effects = data.get("effects")
 
     if not user_id:
         return JsonResponse({"success": False, "message": "user_id가 필요합니다."}, status=400)
@@ -223,6 +228,11 @@ def save_ocr_result(request):
         user_id=user_id, product_id=product_id,
         ocr_image=ocr_image, analysis_type="OCR_INGREDIENT_ANALYSIS",
         risk_score=0, summary="분석 중",
+        product_name=product_name,
+        capacity=capacity,
+        usage=usage,
+        cautions=cautions,
+        effects=effects,
     )
 
     user_profile, allergy_names = _get_user_context(user_id)

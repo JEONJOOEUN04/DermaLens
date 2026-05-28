@@ -44,6 +44,11 @@ class AnalysisResult(models.Model):
     analysis_type = models.CharField(max_length=100, null=True, blank=True)
     risk_score = models.FloatField(null=True, blank=True)
     summary = models.TextField(null=True, blank=True)
+    product_name = models.CharField(max_length=300, null=True, blank=True)
+    capacity = models.CharField(max_length=100, null=True, blank=True)
+    usage = models.JSONField(null=True, blank=True)
+    cautions = models.JSONField(null=True, blank=True)
+    effects = models.JSONField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
