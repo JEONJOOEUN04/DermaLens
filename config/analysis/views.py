@@ -890,8 +890,9 @@ def _build_chat_response(chatbot_resp: dict, user_id: int | None) -> dict:
 @csrf_exempt
 def chat(request):
     """
-    프론트 → 백엔드 챗봇 중계 엔드포인트.
-    챗봇 서버에 intent/keywords 요청 후 DB 조회 결과를 합쳐 반환.
+    챗봇 중계 엔드포인트.
+    - intent/keywords를 직접 보내면 챗봇 서버 호출 생략 (챗봇 담당자 직접 연동 방식)
+    - intent 없으면 챗봇 서버에 분석 요청 후 처리
     """
     if request.method != "POST":
         return JsonResponse({"success": False, "message": "POST 요청만 허용됩니다."}, status=405)
@@ -903,14 +904,26 @@ def chat(request):
 
     message = data.get("message", "").strip()
     user_id = data.get("user_id")
+    intent = data.get("intent")
+    keywords = data.get("keywords", {})
 
     if not message:
         return JsonResponse({"success": False, "message": "message가 필요합니다."}, status=400)
 
-    chatbot_resp = _call_chatbot_server(message)
+    # 챗봇이 intent+keywords 직접 전달한 경우 → 챗봇 서버 호출 생략
+    if intent:
+        chatbot_resp = {
+            "intent": intent,
+            "keywords": keywords,
+            "message": message,
+            "score": data.get("score", 1.0),
+            "components": [],
+            "quickReplies": [],
+        }
+    else:
+        chatbot_resp = _call_chatbot_server(message)
 
     if chatbot_resp is None:
-        # 챗봇 서버 미응답 시 fallback
         return JsonResponse({
             "intent": "UNKNOWN",
             "score": 0,
