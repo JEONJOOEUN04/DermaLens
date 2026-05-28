@@ -16,6 +16,18 @@ class Review(models.Model):
         db_table = 'Review'
 
 
+class ReviewImage(models.Model):
+    image_id = models.AutoField(primary_key=True)
+    review = models.ForeignKey(Review, on_delete=models.CASCADE, related_name='images', db_column='review_id')
+    image_url = models.TextField()
+    order = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'ReviewImage'
+        ordering = ['order', 'image_id']
+
+
 class Feedback(models.Model):
     feedback_id = models.AutoField(primary_key=True)
     user = models.ForeignKey(User, on_delete=models.CASCADE, db_column='user_id')
@@ -44,6 +56,17 @@ class SearchLog(models.Model):
 
     class Meta:
         db_table = 'SearchLog'
+
+
+class ProductView(models.Model):
+    view_id = models.AutoField(primary_key=True)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, db_column='user_id')
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, db_column='product_id')
+    viewed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'ProductView'
+        ordering = ['-viewed_at']
 
 
 class ExternalSource(models.Model):

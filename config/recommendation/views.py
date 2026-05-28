@@ -5,7 +5,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET
 from django.db.models import Count, Avg
 
-from .models import Recommendation
+from .models import Recommendation, UserRoutine, UserRoutineStep
 from products.models import Product, ProductIngredient, ProductLike
 
 
@@ -285,5 +285,199 @@ def product_like_status(request, user_id, product_id):
     like_count = ProductLike.objects.filter(product_id=product_id).count()
     return JsonResponse(
         {"success": True, "liked": liked, "like_count": like_count},
+        json_dumps_params={"ensure_ascii": False},
+    )
+
+
+# =====================
+# 루틴
+# =====================
+
+def _routine_to_dict(routine):
+    return {
+        "routine_id": routine.routine_id,
+        "user_id": routine.user_id,
+        "title": routine.title,
+        "is_public": routine.is_public,
+        "steps": [
+            {
+                "step_id": s.step_id,
+                "step_order": s.step_order,
+                "product_id": s.product_id,
+                "product_name": s.product.product_name if s.product else s.product_name_custom,
+                "image_url": s.product.image_url if s.product else None,
+                "category": s.product.category.category_name if s.product and s.product.category else None,
+                "memo": s.memo,
+            }
+            for s in routine.steps.select_related("product", "product__category").all()
+        ],
+        "created_at": str(routine.created_at),
+        "updated_at": str(routine.updated_at),
+    }
+
+
+@csrf_exempt
+def create_routine(request):
+    """
+    루틴 생성.
+    {
+        "user_id": 1,
+        "title": "아침 루틴",
+        "is_public": true,
+        "steps": [
+            {"step_order": 1, "product_id": 10, "memo": "듬뿍 발라요"},
+            {"step_order": 2, "product_name_custom": "DIY 토너", "memo": null}
+        ]
+    }
+    """
+    if request.method != "POST":
+        return JsonResponse({"success": False, "message": "POST 요청만 허용됩니다."}, status=405)
+
+    try:
+        data = json.loads(request.body.decode("utf-8"))
+    except json.JSONDecodeError:
+        return JsonResponse({"success": False, "message": "JSON 형식이 올바르지 않습니다."}, status=400)
+
+    user_id = data.get("user_id")
+    steps_data = data.get("steps", [])
+
+    if not user_id or not steps_data:
+        return JsonResponse({"success": False, "message": "user_id와 steps가 필요합니다."}, status=400)
+
+    routine = UserRoutine.objects.create(
+        user_id=user_id,
+        title=data.get("title", "나의 루틴"),
+        is_public=data.get("is_public", True),
+    )
+
+    for step in steps_data:
+        product_id = step.get("product_id")
+        product = None
+        if product_id:
+            product = Product.objects.filter(product_id=product_id).first()
+        UserRoutineStep.objects.create(
+            routine=routine,
+            product=product,
+            product_name_custom=step.get("product_name_custom"),
+            step_order=step.get("step_order", 0),
+            memo=step.get("memo"),
+        )
+
+    return JsonResponse(
+        {"success": True, "message": "루틴이 저장되었습니다.", "routine": _routine_to_dict(routine)},
+        status=201, json_dumps_params={"ensure_ascii": False},
+    )
+
+
+@csrf_exempt
+def update_routine(request, routine_id):
+    """루틴 수정 (steps 전체 교체)."""
+    if request.method not in ("POST", "PATCH", "PUT"):
+        return JsonResponse({"success": False, "message": "POST/PATCH 요청만 허용됩니다."}, status=405)
+
+    try:
+        data = json.loads(request.body.decode("utf-8"))
+    except json.JSONDecodeError:
+        return JsonResponse({"success": False, "message": "JSON 형식이 올바르지 않습니다."}, status=400)
+
+    try:
+        routine = UserRoutine.objects.get(routine_id=routine_id, user_id=data.get("user_id"))
+    except UserRoutine.DoesNotExist:
+        return JsonResponse({"success": False, "message": "루틴을 찾을 수 없거나 권한이 없습니다."}, status=404,
+                            json_dumps_params={"ensure_ascii": False})
+
+    if "title" in data:
+        routine.title = data["title"]
+    if "is_public" in data:
+        routine.is_public = data["is_public"]
+    routine.save()
+
+    if "steps" in data:
+        routine.steps.all().delete()
+        for step in data["steps"]:
+            product_id = step.get("product_id")
+            product = Product.objects.filter(product_id=product_id).first() if product_id else None
+            UserRoutineStep.objects.create(
+                routine=routine,
+                product=product,
+                product_name_custom=step.get("product_name_custom"),
+                step_order=step.get("step_order", 0),
+                memo=step.get("memo"),
+            )
+
+    return JsonResponse(
+        {"success": True, "routine": _routine_to_dict(routine)},
+        json_dumps_params={"ensure_ascii": False},
+    )
+
+
+@csrf_exempt
+def delete_routine(request, routine_id):
+    if request.method != "DELETE":
+        return JsonResponse({"success": False, "message": "DELETE 요청만 허용됩니다."}, status=405)
+
+    user_id = request.GET.get("user_id")
+    try:
+        routine = UserRoutine.objects.get(routine_id=routine_id, user_id=user_id)
+    except UserRoutine.DoesNotExist:
+        return JsonResponse({"success": False, "message": "루틴을 찾을 수 없거나 권한이 없습니다."}, status=404,
+                            json_dumps_params={"ensure_ascii": False})
+
+    routine.delete()
+    return JsonResponse({"success": True, "message": "루틴이 삭제되었습니다."}, json_dumps_params={"ensure_ascii": False})
+
+
+@require_GET
+def user_routines(request, user_id):
+    """내 루틴 목록."""
+    routines = UserRoutine.objects.filter(user_id=user_id).order_by("-created_at")
+    return JsonResponse(
+        {"success": True, "count": routines.count(), "routines": [_routine_to_dict(r) for r in routines]},
+        json_dumps_params={"ensure_ascii": False},
+    )
+
+
+@require_GET
+def popular_routines(request, skin_type_code):
+    """
+    피부타입별 인기 루틴 Top 3.
+    같은 피부타입 유저들의 공개 루틴 중 step 구성이 많이 겹치는 순으로 반환.
+    """
+    from users.models import UserSkinProfile
+    user_ids = UserSkinProfile.objects.filter(
+        skin_type__skin_type_code=skin_type_code
+    ).values_list("user_id", flat=True)
+
+    routines = UserRoutine.objects.filter(
+        user_id__in=user_ids, is_public=True
+    ).prefetch_related("steps__product__category").order_by("-created_at")[:50]
+
+    # 루틴을 step 수 기준으로 점수화 (step 많고, product 있는 것 우선)
+    scored = []
+    for r in routines:
+        steps = list(r.steps.all())
+        score = sum(1 for s in steps if s.product_id) * 2 + len(steps)
+        scored.append((score, r))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    top3 = [r for _, r in scored[:3]]
+
+    # 피부타입 유저 수 (퍼센트 계산용)
+    total_users = len(user_ids)
+
+    data = []
+    for rank, r in enumerate(top3, 1):
+        d = _routine_to_dict(r)
+        d["rank"] = rank
+        d["user_count"] = total_users
+        data.append(d)
+
+    return JsonResponse(
+        {
+            "success": True,
+            "skin_type_code": skin_type_code,
+            "total_users": total_users,
+            "routines": data,
+        },
         json_dumps_params={"ensure_ascii": False},
     )
