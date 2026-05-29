@@ -7,6 +7,7 @@ urlpatterns = [
     path("ocr-result/", views.save_ocr_result),
     path("analyze-product/", views.analyze_product),
     path("detail/<int:analysis_id>/", views.analysis_detail),
+    path("delete/<int:analysis_id>/", views.delete_analysis),
     path("history/<int:user_id>/", views.analysis_history),
     path("chat/start/", views.chat_start),
     path("chat/message/", views.chat_message),

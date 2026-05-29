@@ -361,6 +361,23 @@ def analysis_detail(request, analysis_id):
 
 
 @csrf_exempt
+def delete_analysis(request, analysis_id):
+    """성분 분석 결과 삭제."""
+    if request.method != "DELETE":
+        return JsonResponse({"success": False, "message": "DELETE 요청만 허용됩니다."}, status=405)
+
+    user_id = request.GET.get("user_id")
+    try:
+        analysis = AnalysisResult.objects.get(analysis_id=analysis_id, user_id=user_id)
+    except AnalysisResult.DoesNotExist:
+        return JsonResponse({"success": False, "message": "분석 결과를 찾을 수 없거나 권한이 없습니다."}, status=404,
+                            json_dumps_params={"ensure_ascii": False})
+
+    analysis.delete()
+    return JsonResponse({"success": True, "message": "분석 결과가 삭제되었습니다."}, json_dumps_params={"ensure_ascii": False})
+
+
+@csrf_exempt
 def analyze_product(request):
     if request.method != "POST":
         return JsonResponse({"success": False, "message": "POST 요청만 허용됩니다."}, status=405)
