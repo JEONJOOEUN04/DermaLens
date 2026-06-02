@@ -650,6 +650,17 @@ image: [파일]
 
 ---
 
+### DELETE /api/analysis/delete/{analysis_id}/?user_id={user_id} — 분석 결과 삭제
+**Query Params:** `user_id=1` (필수)
+
+**Response** `200`ㅡㅏ
+```json
+{ "success": true, "message": "분석 결과가 삭제되었습니다." }
+```
+> 본인 분석 결과만 삭제 가능. 다른 유저의 결과 삭제 시 404 반환.
+
+---
+
 ### GET /api/analysis/history/{user_id}/ — 분석 기록 목록
 **Query Params:** `page=1`, `size=20`
 
@@ -1034,7 +1045,7 @@ image: [파일]
 
 ---
 
-### GET /api/review/search-history/{user_id}/ — 검색 기록 조회
+### GET /api/review/search-history/{user_id}/ — 최근 검색어 (중복 제거)
 **Response** `200`
 ```json
 {
@@ -1042,12 +1053,226 @@ image: [파일]
   "count": 2,
   "search_history": [
     {
-      "log_id": 1,
       "keyword": "나이아신아마이드",
-      "clicked_product_id": 1,
       "created_at": "2026-05-25 00:00:00"
     }
   ]
+}
+```
+
+---
+
+### GET /api/review/trending/ — 급상승 검색어 Top 10
+**Response** `200`
+```json
+{
+  "success": true,
+  "trending": [
+    { "keyword": "PDRN", "count": 15 },
+    { "keyword": "나이아신아마이드", "count": 10 }
+  ]
+}
+```
+
+---
+
+### POST /api/review/product-view/ — 최근 본 제품 로그 저장
+**Request**
+```json
+{
+  "user_id": 1,
+  "product_id": 10
+}
+```
+**Response** `200`
+```json
+{ "success": true }
+```
+
+---
+
+### GET /api/review/recently-viewed/{user_id}/ — 최근 본 제품 목록
+**Response** `200`
+```json
+{
+  "success": true,
+  "count": 3,
+  "products": [
+    {
+      "product_id": 10,
+      "product_name": "코스알엑스 토너",
+      "image_url": "https://...",
+      "price": 15000,
+      "brand_name": "COSRX",
+      "viewed_at": "2026-05-28 00:00:00"
+    }
+  ]
+}
+```
+
+---
+
+### POST /api/review/{review_id}/images/ — 리뷰 이미지 업로드 (최대 5장)
+**Request** `multipart/form-data`
+```
+user_id: 1
+images: [파일1, 파일2, ...]
+```
+**Response** `201`
+```json
+{
+  "success": true,
+  "uploaded": [
+    { "image_id": 1, "image_url": "/media/review_images/..." }
+  ]
+}
+```
+
+---
+
+### DELETE /api/review/{review_id}/images/{image_id}/ — 리뷰 이미지 삭제
+**Query Params:** `user_id=1`
+
+**Response** `200`
+```json
+{ "success": true, "message": "이미지가 삭제되었습니다." }
+```
+
+---
+
+## 6. 나의 화장대 (루틴)
+
+### POST /api/recommendation/routine/ — 루틴 생성
+**Request**
+```json
+{
+  "user_id": 1,
+  "title": "아침 루틴",
+  "is_public": true,
+  "steps": [
+    { "product_id": 10, "step_order": 0, "memo": "세안 후 바로" },
+    { "product_id": 25, "step_order": 1 },
+    { "product_id": 42, "step_order": 2, "memo": "2펌프" }
+  ]
+}
+```
+**Response** `201`
+```json
+{
+  "success": true,
+  "routine_id": 1,
+  "routine": {
+    "routine_id": 1,
+    "title": "아침 루틴",
+    "is_public": true,
+    "steps": [
+      { "step_id": 1, "product_id": 10, "product_name": "독도토너", "step_order": 0, "memo": "세안 후 바로" }
+    ]
+  }
+}
+```
+
+---
+
+### PATCH /api/recommendation/routine/{routine_id}/ — 루틴 수정
+**Request**
+```json
+{
+  "user_id": 1,
+  "title": "새 제목",
+  "steps": [
+    { "product_id": 10, "step_order": 0 }
+  ]
+}
+```
+**Response** `200`
+```json
+{ "success": true, "routine": { /* 루틴 정보 */ } }
+```
+
+---
+
+### DELETE /api/recommendation/routine/{routine_id}/delete/ — 루틴 삭제
+**Query Params:** `user_id=1`
+
+**Response** `200`
+```json
+{ "success": true, "message": "루틴이 삭제되었습니다." }
+```
+
+---
+
+### GET /api/recommendation/routine/user/{user_id}/ — 내 루틴 목록
+**Response** `200`
+```json
+{
+  "success": true,
+  "count": 2,
+  "routines": [
+    {
+      "routine_id": 1,
+      "title": "아침 루틴",
+      "is_public": true,
+      "step_count": 3,
+      "steps": [ /* 단계 목록 */ ],
+      "created_at": "2026-05-28 00:00:00"
+    }
+  ]
+}
+```
+
+---
+
+### GET /api/recommendation/routine/popular/{skin_type_code}/ — 피부타입별 인기 루틴
+**skin_type_code 예시:** `ON+`, `DS-`, `DN+` 등
+
+**Response** `200`
+```json
+{
+  "success": true,
+  "skin_type_code": "DN+",
+  "count": 3,
+  "routines": [
+    {
+      "routine_id": 5,
+      "title": "나의 데일리 루틴",
+      "step_count": 5,
+      "steps": [ /* 단계 목록 */ ]
+    }
+  ]
+}
+```
+
+---
+
+## 7. OCR 분석 (카메라)
+
+### POST /api/analysis/request-ocr/ — OCR 분석 요청
+**Request** `multipart/form-data`
+```
+user_id: 1
+image_url: https://i.ibb.co/xxx/image.jpg   ← URL로 보낼 때
+또는
+image: [파일]                                 ← 파일로 보낼 때
+```
+**Response** `200`
+```json
+{
+  "success": true,
+  "message": "OCR 분석이 완료되었습니다.",
+  "result": {
+    "analysis_id": 7,
+    "product_name": "팬틴 프레스티지 데미지 리페어 샴푸",
+    "capacity": "750ml",
+    "risk_score": 0.0,
+    "traffic_light": "GREEN",
+    "matched_count": 25,
+    "usage": ["모발에 적당량을 덜어 마사지 후 헹굽니다."],
+    "cautions": ["눈에 들어갔을 때 즉시 씻어낼 것"],
+    "effects": ["판테놀 함량 200% 증가"],
+    "allergy_warnings": ["시트로넬올", "제라니올"],
+    "matched_ingredients": [ /* 성분 목록 */ ]
+  }
 }
 ```
 
