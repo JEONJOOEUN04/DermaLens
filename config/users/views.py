@@ -21,6 +21,7 @@ def _user_to_dict(user):
         "user_id": user.user_id,
         "email": user.email,
         "nickname": user.nickname,
+        "is_staff": user.is_staff,
         "created_at": str(user.created_at),
     }
 
