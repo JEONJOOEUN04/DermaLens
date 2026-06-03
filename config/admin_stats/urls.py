@@ -17,6 +17,7 @@ urlpatterns = [
 
     # 제품/리뷰
     path("products/top-rated", views.products_top_rated),
+    path("products/by-category", views.products_by_category),
     path("reviews", views.reviews_list),
     path("reviews/<int:review_id>/moderate", views.review_moderate),
 

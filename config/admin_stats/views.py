@@ -328,6 +328,37 @@ def products_top_rated(request):
 
 
 @require_GET
+def products_by_category(request):
+    err = _require_staff(request)
+    if err:
+        return err
+    from products.models import Product
+    limit = int(request.GET.get("limit", 0))  # 0 = 전체
+    dist = list(
+        Product.objects
+        .filter(category__isnull=False)
+        .select_related("category")
+        .values("category_id", "category__category_name")
+        .annotate(count=Count("product_id"))
+        .order_by("-count")
+    )
+    if limit:
+        dist = dist[:limit]
+    return JsonResponse({
+        "success": True,
+        "distribution": [
+            {
+                "category_id": d["category_id"],
+                "category_name": d["category__category_name"],
+                "count": d["count"],
+            }
+            for d in dist
+        ],
+        "total": sum(d["count"] for d in dist),
+    }, json_dumps_params={"ensure_ascii": False})
+
+
+@require_GET
 def reviews_list(request):
     err = _require_staff(request)
     if err:
