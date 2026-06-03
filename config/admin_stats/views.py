@@ -442,6 +442,88 @@ def review_moderate(request, review_id):
 # =====================
 
 @require_GET
+def activity_logs(request):
+    """전체 유저 활동 로그 (분석 + 검색 + 제품조회) 통합, 최신순."""
+    err = _require_staff(request)
+    if err:
+        return err
+    from analysis.models import AnalysisResult
+    from review.models import SearchLog, ProductView
+
+    limit = min(int(request.GET.get("limit", 100)), 500)
+    kind = request.GET.get("kind", "all")  # all | analysis | search | view
+
+    items = []
+
+    if kind in ("all", "analysis"):
+        analyses = (
+            AnalysisResult.objects
+            .select_related("user", "product")
+            .order_by("-created_at")[:limit]
+        )
+        for a in analyses:
+            items.append({
+                "id": f"a-{a.analysis_id}",
+                "kind": "analysis",
+                "user_id": a.user_id,
+                "nickname": a.user.nickname if a.user else "",
+                "time": str(a.created_at),
+                "title": a.product_name or (a.product.product_name if a.product else "성분 분석"),
+                "detail": a.summary or "",
+                "traffic_light": "GREEN" if (a.risk_score or 0) <= 2 else ("YELLOW" if (a.risk_score or 0) <= 5 else "RED"),
+                "risk_score": a.risk_score,
+            })
+
+    if kind in ("all", "search"):
+        searches = (
+            SearchLog.objects
+            .select_related("user")
+            .order_by("-created_at")[:limit]
+        )
+        for s in searches:
+            items.append({
+                "id": f"s-{s.search_id}",
+                "kind": "search",
+                "user_id": s.user_id,
+                "nickname": s.user.nickname if s.user else "",
+                "time": str(s.created_at),
+                "title": s.keyword,
+                "detail": "검색어",
+                "traffic_light": None,
+                "risk_score": None,
+            })
+
+    if kind in ("all", "view"):
+        views = (
+            ProductView.objects
+            .select_related("user", "product__brand")
+            .order_by("-viewed_at")[:limit]
+        )
+        for v in views:
+            p = v.product
+            items.append({
+                "id": f"v-{v.view_id}",
+                "kind": "view",
+                "user_id": v.user_id,
+                "nickname": v.user.nickname if v.user else "",
+                "time": str(v.viewed_at),
+                "title": p.product_name if p else "",
+                "detail": (p.brand.brand_name_kr if p and p.brand else ""),
+                "traffic_light": None,
+                "risk_score": None,
+            })
+
+    items.sort(key=lambda x: x["time"], reverse=True)
+    items = items[:limit]
+
+    return JsonResponse({
+        "success": True,
+        "count": len(items),
+        "logs": items,
+    }, json_dumps_params={"ensure_ascii": False})
+
+
+@require_GET
 def chat_usage(request):
     err = _require_staff(request)
     if err:

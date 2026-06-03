@@ -21,6 +21,9 @@ urlpatterns = [
     path("reviews", views.reviews_list),
     path("reviews/<int:review_id>/moderate", views.review_moderate),
 
+    # 활동 로그 (전체 유저)
+    path("activity-logs", views.activity_logs),
+
     # 챗봇
     path("stats/chat/usage", views.chat_usage),
     path("stats/chat/intents", views.chat_intents),
