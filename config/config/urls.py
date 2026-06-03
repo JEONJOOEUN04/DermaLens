@@ -23,6 +23,8 @@ urlpatterns = [
 
     path("api/review/", include("review.urls")),
 
+    path("api/admin/", include("admin_stats.urls")),
+
 ]
 
 if settings.DEBUG:
