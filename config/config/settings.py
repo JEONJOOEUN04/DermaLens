@@ -142,7 +142,8 @@ USE_TZ = True
 # 정적 파일
 # ========================
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 
 # ========================
