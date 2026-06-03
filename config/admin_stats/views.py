@@ -1,155 +1,453 @@
 import datetime
 from django.http import JsonResponse
 from django.views.decorators.http import require_GET
-from django.db.models import Count, Avg
+from django.views.decorators.csrf import csrf_exempt
+from django.db.models import Count, Avg, Q
 from django.utils import timezone
+import json
+
+
+def _require_staff(request):
+    """is_staff 체크. 비관리자면 403 반환, 관리자면 None."""
+    from users.models import User
+    user_id = request.GET.get("user_id") or request.headers.get("X-User-Id")
+    if not user_id:
+        return JsonResponse({"success": False, "message": "user_id가 필요합니다."}, status=403)
+    try:
+        user = User.objects.get(user_id=user_id, is_staff=True)
+    except User.DoesNotExist:
+        return JsonResponse({"success": False, "message": "관리자 권한이 필요합니다."}, status=403)
+    return None
+
+
+def _parse_date(s, default):
+    try:
+        return datetime.date.fromisoformat(s)
+    except Exception:
+        return default
+
+
+# =====================
+# 유저 현황
+# =====================
+
+@require_GET
+def users_count(request):
+    err = _require_staff(request)
+    if err:
+        return err
+    from users.models import User
+    now = timezone.now()
+    total = User.objects.count()
+    active = User.objects.filter(created_at__gte=now - datetime.timedelta(days=30)).count()
+    dormant = total - active
+    banned = User.objects.filter(is_active=False).count()
+    return JsonResponse({
+        "success": True,
+        "stats": {
+            "total": total,
+            "active_last_30d": active,
+            "dormant": dormant,
+            "banned": banned,
+        }
+    })
 
 
 @require_GET
-def stats(request):
-    from users.models import User, UserSkinProfile, SurveyResponse
-    from products.models import Product, ProductLike
-    from review.models import Review, SearchLog
-    from analysis.models import AnalysisResult, OCR_AnalysisDetail
-    from analysis.models import ChatMessage
+def users_signups(request):
+    err = _require_staff(request)
+    if err:
+        return err
+    from users.models import User
+    period = request.GET.get("period", "daily")
+    today = timezone.now().date()
 
-    now = timezone.now()
-    today = now.date()
-    week_ago = now - datetime.timedelta(days=7)
-    month_ago = now - datetime.timedelta(days=30)
+    if period == "weekly":
+        default_from = today - datetime.timedelta(weeks=12)
+    elif period == "monthly":
+        default_from = today - datetime.timedelta(days=365)
+    else:
+        default_from = today - datetime.timedelta(days=30)
 
-    # =====================
-    # 유저 현황
-    # =====================
-    total_users = User.objects.count()
-    new_today = User.objects.filter(created_at__date=today).count()
-    new_this_week = User.objects.filter(created_at__gte=week_ago).count()
+    date_from = _parse_date(request.GET.get("from"), default_from)
+    date_to = _parse_date(request.GET.get("to"), today)
 
-    survey_users = SurveyResponse.objects.values("user_id").distinct().count()
-    kakao_users = User.objects.filter(kakao_id__isnull=False).count()
+    series = []
+    total = 0
 
-    skin_dist = list(
+    if period == "daily":
+        d = date_from
+        while d <= date_to:
+            count = User.objects.filter(created_at__date=d).count()
+            series.append({"date": str(d), "count": count})
+            total += count
+            d += datetime.timedelta(days=1)
+    elif period == "weekly":
+        d = date_from
+        while d <= date_to:
+            week_end = min(d + datetime.timedelta(days=6), date_to)
+            count = User.objects.filter(created_at__date__gte=d, created_at__date__lte=week_end).count()
+            series.append({"date": str(d), "count": count})
+            total += count
+            d += datetime.timedelta(weeks=1)
+    elif period == "monthly":
+        d = date_from.replace(day=1)
+        while d <= date_to:
+            next_month = (d.replace(day=28) + datetime.timedelta(days=4)).replace(day=1)
+            count = User.objects.filter(created_at__date__gte=d, created_at__date__lt=next_month).count()
+            series.append({"date": str(d)[:7], "count": count})
+            total += count
+            d = next_month
+
+    return JsonResponse({"success": True, "period": period, "series": series, "total": total})
+
+
+@require_GET
+def users_by_skin_type(request):
+    err = _require_staff(request)
+    if err:
+        return err
+    from users.models import UserSkinProfile
+    dist = list(
         UserSkinProfile.objects
         .select_related("skin_type")
-        .values("skin_type__skin_type_code")
+        .values("skin_type__skin_type_code", "skin_type__skin_type_name_kr")
         .annotate(count=Count("profile_id"))
         .order_by("-count")
     )
-    skin_distribution = [
-        {"skin_type": d["skin_type__skin_type_code"] or "미설정", "count": d["count"]}
-        for d in skin_dist
+    distribution = [
+        {
+            "skin_type_code": d["skin_type__skin_type_code"] or "UNKNOWN",
+            "skin_type_name": d["skin_type__skin_type_name_kr"] or "미설정",
+            "count": d["count"],
+        }
+        for d in dist
     ]
+    total = sum(d["count"] for d in distribution)
+    return JsonResponse({"success": True, "distribution": distribution, "total": total})
 
-    # 일별 신규 가입자 (최근 7일)
-    daily_signup = []
-    for i in range(6, -1, -1):
-        d = today - datetime.timedelta(days=i)
-        count = User.objects.filter(created_at__date=d).count()
-        daily_signup.append({"date": str(d), "count": count})
 
-    # =====================
-    # 분석 활동
-    # =====================
-    total_analysis = AnalysisResult.objects.count()
-    analysis_today = AnalysisResult.objects.filter(created_at__date=today).count()
+@require_GET
+def users_by_provider(request):
+    err = _require_staff(request)
+    if err:
+        return err
+    from users.models import User
+    total = User.objects.count()
+    kakao = User.objects.filter(kakao_id__isnull=False).count()
+    email = total - kakao
+    return JsonResponse({
+        "success": True,
+        "providers": [
+            {"provider": "email", "count": email, "ratio": round(email / total, 3) if total else 0},
+            {"provider": "kakao", "count": kakao, "ratio": round(kakao / total, 3) if total else 0},
+        ],
+        "total": total,
+    })
 
-    traffic_counts = dict(
-        AnalysisResult.objects
-        .exclude(risk_score__isnull=True)
-        .values_list("risk_score")
-        .annotate(c=Count("analysis_id"))
-        [:0]  # just init
-    )
-    green = AnalysisResult.objects.filter(risk_score__lte=2).count()
-    yellow = AnalysisResult.objects.filter(risk_score__gt=2, risk_score__lte=5).count()
-    red = AnalysisResult.objects.filter(risk_score__gt=5).count()
 
-    top_risk_ingredients = list(
-        OCR_AnalysisDetail.objects
-        .filter(match_status="MATCHED")
-        .select_related("ingredient")
-        .values("ingredient__ingredient_name_kr")
-        .annotate(count=Count("analysis_detail_id"))
-        .order_by("-count")[:10]
-    )
-    top_risk = [
-        {"ingredient": d["ingredient__ingredient_name_kr"], "count": d["count"]}
-        for d in top_risk_ingredients
-    ]
+@require_GET
+def survey_completion(request):
+    err = _require_staff(request)
+    if err:
+        return err
+    from users.models import User, SurveyResponse
+    total = User.objects.count()
+    completed = SurveyResponse.objects.values("user_id").distinct().count()
+    not_completed = total - completed
+    return JsonResponse({
+        "success": True,
+        "completed": completed,
+        "not_completed": not_completed,
+        "completion_rate": round(completed / total, 3) if total else 0,
+    })
 
-    top_analyzed_products = list(
+
+# =====================
+# 분석 활동
+# =====================
+
+@require_GET
+def analysis_daily(request):
+    err = _require_staff(request)
+    if err:
+        return err
+    from analysis.models import AnalysisResult
+    today = timezone.now().date()
+    date_from = _parse_date(request.GET.get("from"), today - datetime.timedelta(days=30))
+    date_to = _parse_date(request.GET.get("to"), today)
+
+    series = []
+    d = date_from
+    while d <= date_to:
+        ocr = AnalysisResult.objects.filter(created_at__date=d, analysis_type="OCR_INGREDIENT_ANALYSIS").count()
+        product_search = AnalysisResult.objects.filter(created_at__date=d, analysis_type="PRODUCT_SEARCH_ANALYSIS").count()
+        series.append({"date": str(d), "ocr": ocr, "product_search": product_search, "total": ocr + product_search})
+        d += datetime.timedelta(days=1)
+
+    return JsonResponse({"success": True, "series": series})
+
+
+@require_GET
+def analysis_traffic(request):
+    err = _require_staff(request)
+    if err:
+        return err
+    from analysis.models import AnalysisResult
+    qs = AnalysisResult.objects.exclude(risk_score__isnull=True)
+    today = timezone.now().date()
+    date_from = _parse_date(request.GET.get("from"), None)
+    date_to = _parse_date(request.GET.get("to"), None)
+    if date_from:
+        qs = qs.filter(created_at__date__gte=date_from)
+    if date_to:
+        qs = qs.filter(created_at__date__lte=date_to)
+
+    green = qs.filter(risk_score__lte=2).count()
+    yellow = qs.filter(risk_score__gt=2, risk_score__lte=5).count()
+    red = qs.filter(risk_score__gt=5).count()
+    total = green + yellow + red
+
+    return JsonResponse({
+        "success": True,
+        "distribution": [
+            {"level": "GREEN", "count": green, "ratio": round(green / total, 3) if total else 0},
+            {"level": "YELLOW", "count": yellow, "ratio": round(yellow / total, 3) if total else 0},
+            {"level": "RED", "count": red, "ratio": round(red / total, 3) if total else 0},
+        ],
+        "total": total,
+    })
+
+
+@require_GET
+def analysis_top_products(request):
+    err = _require_staff(request)
+    if err:
+        return err
+    from analysis.models import AnalysisResult
+    limit = min(int(request.GET.get("limit", 10)), 50)
+    products = list(
         AnalysisResult.objects
         .filter(product_id__isnull=False)
-        .select_related("product")
-        .values("product__product_name")
-        .annotate(count=Count("analysis_id"))
-        .order_by("-count")[:10]
+        .select_related("product__brand")
+        .values("product_id", "product__product_name", "product__brand__brand_name_kr", "product__image_url")
+        .annotate(analysis_count=Count("analysis_id"))
+        .order_by("-analysis_count")[:limit]
     )
-    top_products_analyzed = [
-        {"product_name": d["product__product_name"], "count": d["count"]}
-        for d in top_analyzed_products
-    ]
+    return JsonResponse({
+        "success": True,
+        "products": [
+            {
+                "product_id": p["product_id"],
+                "product_name": p["product__product_name"],
+                "brand_name": p["product__brand__brand_name_kr"] or "",
+                "image_url": p["product__image_url"] or "",
+                "analysis_count": p["analysis_count"],
+            }
+            for p in products
+        ]
+    })
 
-    # =====================
-    # 제품/리뷰
-    # =====================
-    top_liked = list(
-        ProductLike.objects
-        .values("product__product_name", "product_id")
-        .annotate(count=Count("product_id"))
-        .order_by("-count")[:10]
+
+@require_GET
+def ingredients_top_risk(request):
+    err = _require_staff(request)
+    if err:
+        return err
+    from analysis.models import OCR_AnalysisDetail
+    limit = min(int(request.GET.get("limit", 10)), 50)
+    min_risk = int(request.GET.get("min_risk_level", 1))
+
+    ings = list(
+        OCR_AnalysisDetail.objects
+        .filter(match_status="MATCHED", ingredient__risk_level__gte=min_risk)
+        .select_related("ingredient")
+        .values(
+            "ingredient_id",
+            "ingredient__ingredient_name_kr",
+            "ingredient__ingredient_name_en",
+            "ingredient__risk_level",
+            "ingredient__allergy_flag",
+            "ingredient__irritant_flag",
+        )
+        .annotate(detection_count=Count("analysis_detail_id"))
+        .order_by("-detection_count")[:limit]
     )
-    top_liked_products = [
-        {"product_name": d["product__product_name"], "like_count": d["count"]}
-        for d in top_liked
-    ]
+    return JsonResponse({
+        "success": True,
+        "ingredients": [
+            {
+                "ingredient_id": i["ingredient_id"],
+                "ingredient_name_kr": i["ingredient__ingredient_name_kr"],
+                "ingredient_name_en": i["ingredient__ingredient_name_en"],
+                "risk_level": i["ingredient__risk_level"],
+                "detection_count": i["detection_count"],
+                "allergy_flag": i["ingredient__allergy_flag"],
+                "irritant_flag": i["ingredient__irritant_flag"],
+            }
+            for i in ings
+        ]
+    })
 
-    top_rated = list(
+
+# =====================
+# 제품/리뷰
+# =====================
+
+@require_GET
+def products_top_rated(request):
+    err = _require_staff(request)
+    if err:
+        return err
+    from review.models import Review
+    limit = min(int(request.GET.get("limit", 10)), 50)
+    min_reviews = int(request.GET.get("min_reviews", 5))
+
+    products = list(
         Review.objects
-        .values("product__product_name", "product_id")
-        .annotate(avg=Avg("rating"), count=Count("review_id"))
-        .filter(count__gte=3)
-        .order_by("-avg")[:10]
+        .select_related("product__brand")
+        .values("product_id", "product__product_name", "product__brand__brand_name_kr", "product__image_url")
+        .annotate(avg_rating=Avg("rating"), review_count=Count("review_id"))
+        .filter(review_count__gte=min_reviews)
+        .order_by("-avg_rating")[:limit]
     )
-    top_rated_products = [
-        {"product_name": d["product__product_name"], "avg_rating": round(d["avg"], 1), "review_count": d["count"]}
-        for d in top_rated
-    ]
+    return JsonResponse({
+        "success": True,
+        "products": [
+            {
+                "product_id": p["product_id"],
+                "product_name": p["product__product_name"],
+                "brand_name": p["product__brand__brand_name_kr"] or "",
+                "image_url": p["product__image_url"] or "",
+                "avg_rating": round(p["avg_rating"], 1),
+                "review_count": p["review_count"],
+            }
+            for p in products
+        ]
+    })
 
-    recent_reviews = list(
-        Review.objects
-        .select_related("product", "user")
-        .order_by("-created_at")[:10]
-        .values("review_id", "user__nickname", "product__product_name", "rating", "review_text", "created_at")
-    )
-    recent_reviews_list = [
+
+@require_GET
+def reviews_list(request):
+    err = _require_staff(request)
+    if err:
+        return err
+    from review.models import Review, ReviewImage
+    page = int(request.GET.get("page", 1))
+    size = int(request.GET.get("size", 20))
+    sort = request.GET.get("sort", "recent")
+    offset = (page - 1) * size
+
+    qs = Review.objects.select_related("product", "user")
+    if sort == "rating_asc":
+        qs = qs.order_by("rating", "-created_at")
+    elif sort == "rating_desc":
+        qs = qs.order_by("-rating", "-created_at")
+    else:
+        qs = qs.order_by("-created_at")
+
+    total_count = qs.count()
+    reviews = qs[offset:offset + size]
+
+    data = [
         {
-            "review_id": r["review_id"],
-            "nickname": r["user__nickname"],
-            "product_name": r["product__product_name"],
-            "rating": r["rating"],
-            "review_text": r["review_text"],
-            "created_at": str(r["created_at"]),
+            "review_id": r.review_id,
+            "user_id": r.user_id,
+            "nickname": r.user.nickname,
+            "product_id": r.product_id,
+            "product_name": r.product.product_name,
+            "rating": r.rating,
+            "review_text": r.review_text,
+            "image_count": r.images.count(),
+            "created_at": str(r.created_at),
         }
-        for r in recent_reviews
+        for r in reviews
     ]
+    return JsonResponse({
+        "success": True,
+        "page": page,
+        "size": size,
+        "count": len(data),
+        "total_count": total_count,
+        "total_pages": (total_count + size - 1) // size,
+        "reviews": data,
+    }, json_dumps_params={"ensure_ascii": False})
 
-    trending = list(
-        SearchLog.objects
-        .filter(created_at__gte=week_ago)
-        .values("keyword")
-        .annotate(count=Count("search_id"))
-        .order_by("-count")[:10]
-    )
-    trending_keywords = [{"keyword": t["keyword"], "count": t["count"]} for t in trending]
 
-    # =====================
-    # 챗봇
-    # =====================
-    total_chat = ChatMessage.objects.filter(message_type="USER").count()
-    chat_today = ChatMessage.objects.filter(message_type="USER", created_at__date=today).count()
+@csrf_exempt
+def review_moderate(request, review_id):
+    from users.models import User
+    user_id = request.GET.get("user_id") or request.headers.get("X-User-Id")
+    if not user_id or not User.objects.filter(user_id=user_id, is_staff=True).exists():
+        return JsonResponse({"success": False, "message": "관리자 권한이 필요합니다."}, status=403)
 
-    intent_dist = list(
+    if request.method != "PATCH":
+        return JsonResponse({"success": False, "message": "PATCH 요청만 허용됩니다."}, status=405)
+
+    try:
+        data = json.loads(request.body.decode("utf-8"))
+    except Exception:
+        return JsonResponse({"success": False, "message": "JSON 형식이 올바르지 않습니다."}, status=400)
+
+    from review.models import Review
+    action = data.get("action")
+    try:
+        review = Review.objects.get(review_id=review_id)
+    except Review.DoesNotExist:
+        return JsonResponse({"success": False, "message": "리뷰를 찾을 수 없습니다."}, status=404,
+                            json_dumps_params={"ensure_ascii": False})
+
+    if action == "delete":
+        review.delete()
+        return JsonResponse({"success": True, "review_id": review_id, "status": "deleted"},
+                            json_dumps_params={"ensure_ascii": False})
+
+    return JsonResponse({"success": True, "review_id": review_id, "action": action},
+                        json_dumps_params={"ensure_ascii": False})
+
+
+# =====================
+# 챗봇
+# =====================
+
+@require_GET
+def chat_usage(request):
+    err = _require_staff(request)
+    if err:
+        return err
+    from analysis.models import ChatMessage, ChatSession
+    today = timezone.now().date()
+    date_from = _parse_date(request.GET.get("from"), today - datetime.timedelta(days=30))
+    date_to = _parse_date(request.GET.get("to"), today)
+
+    series = []
+    d = date_from
+    while d <= date_to:
+        sessions = ChatSession.objects.filter(created_at__date=d).count()
+        messages = ChatMessage.objects.filter(message_type="USER", created_at__date=d).count()
+        series.append({"date": str(d), "sessions": sessions, "messages": messages})
+        d += datetime.timedelta(days=1)
+
+    total_sessions = ChatSession.objects.count()
+    total_messages = ChatMessage.objects.filter(message_type="USER").count()
+    avg = round(total_messages / total_sessions, 1) if total_sessions else 0
+
+    return JsonResponse({
+        "success": True,
+        "series": series,
+        "total_sessions": total_sessions,
+        "total_messages": total_messages,
+        "avg_messages_per_session": avg,
+    })
+
+
+@require_GET
+def chat_intents(request):
+    err = _require_staff(request)
+    if err:
+        return err
+    from analysis.models import ChatMessage
+    dist = list(
         ChatMessage.objects
         .filter(message_type="BOT")
         .exclude(intent__isnull=True)
@@ -157,36 +455,12 @@ def stats(request):
         .annotate(count=Count("message_id"))
         .order_by("-count")
     )
-    intent_distribution = [{"intent": d["intent"], "count": d["count"]} for d in intent_dist]
-
+    total = sum(d["count"] for d in dist)
     return JsonResponse({
-        "users": {
-            "total": total_users,
-            "new_today": new_today,
-            "new_this_week": new_this_week,
-            "survey_responded": survey_users,
-            "survey_rate": round(survey_users / total_users * 100, 1) if total_users else 0,
-            "kakao_login": kakao_users,
-            "normal_login": total_users - kakao_users,
-            "skin_distribution": skin_distribution,
-            "daily_signup": daily_signup,
-        },
-        "analysis": {
-            "total": total_analysis,
-            "today": analysis_today,
-            "traffic_light": {"GREEN": green, "YELLOW": yellow, "RED": red},
-            "top_risk_ingredients": top_risk,
-            "top_analyzed_products": top_products_analyzed,
-        },
-        "products": {
-            "top_liked": top_liked_products,
-            "top_rated": top_rated_products,
-            "recent_reviews": recent_reviews_list,
-            "trending_keywords": trending_keywords,
-        },
-        "chatbot": {
-            "total_messages": total_chat,
-            "today_messages": chat_today,
-            "intent_distribution": intent_distribution,
-        },
-    }, json_dumps_params={"ensure_ascii": False})
+        "success": True,
+        "distribution": [
+            {"intent": d["intent"], "count": d["count"], "ratio": round(d["count"] / total, 3) if total else 0}
+            for d in dist
+        ],
+        "total": total,
+    })
