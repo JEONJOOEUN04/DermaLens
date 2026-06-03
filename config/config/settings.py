@@ -50,6 +50,7 @@ INSTALLED_APPS = [
     'analysis',
     'recommendation',
     'review',
+    'admin_stats',
 ]
 
 
