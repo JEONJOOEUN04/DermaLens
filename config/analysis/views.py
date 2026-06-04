@@ -868,10 +868,19 @@ def _build_chat_response(chatbot_resp: dict, user_id: int | None) -> dict:
         if ing:
             risk = ing.risk_level or 0
             risk_label = "HIGH" if risk >= 7 else ("MEDIUM" if risk >= 4 else "LOW")
+            from products.models import IngredientFunction
+            functions = list(
+                IngredientFunction.objects
+                .filter(ingredient=ing)
+                .select_related("function")
+                .values_list("function__function_name_kr", flat=True)
+            )
             components.append({
                 "type": "card",
                 "title": ing.ingredient_name_kr,
-                "description": ing.description or ing.ingredient_name_en or "",
+                "name_en": ing.ingredient_name_en or "",
+                "description": ing.description or "",
+                "functions": functions,
                 "riskLevel": risk_label,
                 "allergy_flag": ing.allergy_flag,
                 "irritant_flag": ing.irritant_flag,
