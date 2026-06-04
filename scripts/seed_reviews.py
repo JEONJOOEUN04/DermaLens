@@ -22,8 +22,9 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 import django
 django.setup()
 
+from django.db import transaction
 from django.contrib.auth.hashers import make_password
-from users.models import User, UserSkinProfile, SkinTypeMaster
+from users.models import User, UserSkinProfile, SkinTypeMaster, SurveyResponse, SurveyOption
 from products.models import Product, ProductLike, Category
 from review.models import Review
 from recommendation.models import UserRoutine, UserRoutineStep
@@ -140,6 +141,37 @@ def get_rating_for_product(skin_type_code, product):
         return random.choices([3, 4, 2], weights=[40, 35, 25])[0], "mid"
 
 
+def build_survey_answers(skin_type_code):
+    """
+    피부타입 코드(OS+/ON-/DS+/DN- 등)에 일관된 설문 점수 역산.
+    코드 규칙: [O/D 지성·건성][S/N 민감·비민감][+/- 수분충분·수분부족]
+    임계값 4 기준 (백엔드 _classify_skin_type 로직과 동일).
+    """
+    code = (skin_type_code or "DN+").upper()
+    is_oily = code[0] == "O"
+    is_sensitive = len(code) > 1 and code[1] == "S"
+    is_dehydrated = code.endswith("-")
+
+    def score(high):
+        return random.randint(5, 8) if high else random.randint(0, 3)
+
+    oil_score = score(is_oily)
+    sensitive_score = score(is_sensitive)
+    dehydrated_score = score(is_dehydrated)
+
+    # 실제 선택지 ID 일부를 랜덤 샘플 (참고용)
+    option_ids = list(
+        SurveyOption.objects.order_by("?").values_list("option_id", flat=True)[:10]
+    )
+
+    return {
+        "oil_score": oil_score,
+        "sensitive_score": sensitive_score,
+        "dehydrated_score": dehydrated_score,
+        "selected_option_ids": sorted(option_ids),
+    }
+
+
 def create_routine_for_user(user, skin_type_code, all_products):
     prefs = SKIN_TYPE_PREFERENCES.get(skin_type_code, {"high": [], "low": []})
     preferred_cats = prefs["high"]
@@ -195,28 +227,47 @@ def reset_dummy_data():
     user_ids = list(dummy_users.values_list("user_id", flat=True))
     Review.objects.filter(user_id__in=user_ids).delete()
     ProductLike.objects.filter(user_id__in=user_ids).delete()
+    SurveyResponse.objects.filter(user_id__in=user_ids).delete()
+    UserRoutine.objects.filter(user_id__in=user_ids).delete()
     dummy_users.delete()
     print(f"더미 데이터 {len(user_ids)}명 삭제 완료")
 
 
-def run(users_per_type=20, reviews_per_user=15):
+def _flush_reviews(review_buf, batch=500):
+    for i in range(0, len(review_buf), batch):
+        Review.objects.bulk_create(review_buf[i:i + batch], ignore_conflicts=True)
+
+
+def _flush_likes(like_buf, batch=500):
+    likes = [ProductLike(user_id=uid, product_id=pid) for (uid, pid) in like_buf]
+    for i in range(0, len(likes), batch):
+        ProductLike.objects.bulk_create(likes[i:i + batch], ignore_conflicts=True)
+
+
+def run(users_per_type=40, reviews_per_user=20, reviews_per_product=20):
     skin_types = list(SkinTypeMaster.objects.filter(is_active=True))
     if not skin_types:
         print("SkinTypeMaster 데이터가 없습니다. 마스터 데이터를 먼저 넣어주세요.")
         return
 
-    products = list(Product.objects.select_related("category").all()[:300])
+    products = list(Product.objects.select_related("category").all())
     if not products:
         print("Product 데이터가 없습니다. seed_products.py를 먼저 실행해주세요.")
         return
 
     print(f"피부타입 {len(skin_types)}개 × {users_per_type}명 = {len(skin_types) * users_per_type}명 생성")
     print(f"유저당 최대 {reviews_per_user}개 리뷰")
+    print(f"제품 {len(products)}개 → 제품당 최소 {reviews_per_product}개 리뷰 보장")
 
     total_users = 0
     total_reviews = 0
     total_likes = 0
     total_routines = 0
+    total_surveys = 0
+
+    all_users = []  # (user, code) — 제품 채우기 패스에서 재사용
+    review_buf = []  # bulk_create 버퍼
+    like_buf = set()  # (user_id, product_id) 중복 방지
 
     for skin_type in skin_types:
         code = skin_type.skin_type_code
@@ -240,6 +291,14 @@ def run(users_per_type=20, reviews_per_user=15):
                 acne_prone_flag=random.choice([True, False]),
             )
             total_users += 1
+            all_users.append((user, code))
+
+            # 설문 응답 생성 (피부타입과 일관된 점수)
+            SurveyResponse.objects.create(
+                user=user,
+                answers_json=build_survey_answers(code),
+            )
+            total_surveys += 1
 
             # 리뷰할 상품 선택 (선호 카테고리 위주)
             preferred = [p for p in products if any(h in get_category_name(p) for h in prefs["high"])]
@@ -257,19 +316,16 @@ def run(users_per_type=20, reviews_per_user=15):
                 reviewed_ids.add(product.product_id)
 
                 rating, tier = get_rating_for_product(code, product)
-                review_text = random.choice(REVIEW_TEXTS[tier])
-
-                Review.objects.create(
+                review_buf.append(Review(
                     user=user,
                     product=product,
                     rating=rating,
-                    review_text=review_text,
-                )
+                    review_text=random.choice(REVIEW_TEXTS[tier]),
+                ))
                 total_reviews += 1
 
-                # 4~5점 상품은 좋아요도
                 if rating >= 4 and random.random() < 0.6:
-                    ProductLike.objects.get_or_create(user=user, product=product)
+                    like_buf.add((user.user_id, product.product_id))
                     total_likes += 1
 
             # 루틴 생성 (70% 확률로 1개)
@@ -278,26 +334,83 @@ def run(users_per_type=20, reviews_per_user=15):
                 if routine:
                     total_routines += 1
 
+        # 피부타입 단위로 일괄 삽입 (연결 안정성)
+        _flush_reviews(review_buf)
+        _flush_likes(like_buf)
+        review_buf.clear()
+        like_buf.clear()
         print(f"[{code}] {users_per_type}명 완료")
+
+    # =========================================================
+    # 제품 채우기 패스: 각 제품이 최소 reviews_per_product개 리뷰를 갖도록 보강
+    # =========================================================
+    print(f"\n제품당 리뷰 {reviews_per_product}개 채우는 중...")
+    fill_reviews = 0
+    fill_buf = []
+    fill_likes = set()
+
+    # 제품별 기존 리뷰어 user_id 한 번에 조회
+    from collections import defaultdict
+    existing_map = defaultdict(set)
+    for pid, uid in Review.objects.values_list("product_id", "user_id"):
+        existing_map[pid].add(uid)
+
+    for product in products:
+        existing = existing_map[product.product_id]
+        need = reviews_per_product - len(existing)
+        if need <= 0:
+            continue
+
+        candidates = [(u, c) for (u, c) in all_users if u.user_id not in existing]
+        random.shuffle(candidates)
+
+        for user, code in candidates[:need]:
+            rating, tier = get_rating_for_product(code, product)
+            fill_buf.append(Review(
+                user=user,
+                product=product,
+                rating=rating,
+                review_text=random.choice(REVIEW_TEXTS[tier]),
+            ))
+            fill_reviews += 1
+            total_reviews += 1
+            if rating >= 4 and random.random() < 0.4:
+                fill_likes.add((user.user_id, product.product_id))
+                total_likes += 1
+
+        # 1000개마다 중간 flush (메모리·연결 관리)
+        if len(fill_buf) >= 1000:
+            _flush_reviews(fill_buf)
+            fill_buf = []
+
+    _flush_reviews(fill_buf)
+    _flush_likes(fill_likes)
+    print(f"제품 채우기로 추가된 리뷰: {fill_reviews}개")
 
     print(f"\n=== 완료 ===")
     print(f"생성된 유저: {total_users}명")
     print(f"생성된 리뷰: {total_reviews}개")
     print(f"생성된 좋아요: {total_likes}개")
     print(f"생성된 루틴: {total_routines}개")
+    print(f"생성된 설문: {total_surveys}개")
 
 
 def main():
     parser = argparse.ArgumentParser(description="피부타입별 더미 데이터 생성")
     parser.add_argument("--reset", action="store_true", help="기존 더미 데이터 삭제 후 재생성")
-    parser.add_argument("--users", type=int, default=100, help="피부타입당 유저 수 (기본: 100)")
-    parser.add_argument("--reviews", type=int, default=15, help="유저당 리뷰 수 (기본: 15)")
+    parser.add_argument("--users", type=int, default=40, help="피부타입당 유저 수 (기본: 40)")
+    parser.add_argument("--reviews", type=int, default=20, help="유저당 리뷰 수 (기본: 20)")
+    parser.add_argument("--per-product", type=int, default=20, help="제품당 최소 리뷰 수 (기본: 20)")
     args = parser.parse_args()
 
     if args.reset:
         reset_dummy_data()
 
-    run(users_per_type=args.users, reviews_per_user=args.reviews)
+    run(
+        users_per_type=args.users,
+        reviews_per_user=args.reviews,
+        reviews_per_product=args.per_product,
+    )
 
 
 if __name__ == "__main__":
