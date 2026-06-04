@@ -638,6 +638,21 @@ def kakao_callback(request):
     except Exception as e:
         return JsonResponse({"success": False, "message": f"카카오 유저 정보 요청 실패: {e}"}, status=502)
 
+    user, is_new = _get_or_create_kakao_user(user_info)
+    tokens = _get_tokens(user)
+    return JsonResponse(
+        {
+            "success": True,
+            "is_new_user": is_new,
+            "user": _user_to_dict(user),
+            "tokens": tokens,
+        },
+        json_dumps_params={"ensure_ascii": False},
+    )
+
+
+def _get_or_create_kakao_user(user_info):
+    """카카오 유저 정보로 User 조회/생성. (user, is_new) 반환."""
     kakao_id = str(user_info.get("id", ""))
     kakao_account = user_info.get("kakao_account", {})
     email = kakao_account.get("email") or f"kakao_{kakao_id}@kakao.placeholder"
@@ -646,27 +661,58 @@ def kakao_callback(request):
         or f"kakao_{kakao_id[:6]}"
     )
 
-    # 3. 유저 조회 또는 생성
     user = User.objects.filter(kakao_id=kakao_id).first()
-    is_new = False
+    if user:
+        return user, False
 
-    if not user:
-        user = User.objects.filter(email=email).first()
-        if user:
-            # 기존 일반 가입 유저 → kakao_id 연결
-            user.kakao_id = kakao_id
-            user.save()
-        else:
-            # 신규 가입
-            user = User.objects.create(
-                email=email,
-                password=make_password(None),  # 카카오 유저는 비밀번호 없음
-                nickname=nickname,
-                kakao_id=kakao_id,
-            )
-            UserSkinProfile.objects.create(user=user)
-            is_new = True
+    user = User.objects.filter(email=email).first()
+    if user:
+        user.kakao_id = kakao_id
+        user.save()
+        return user, False
 
+    user = User.objects.create(
+        email=email,
+        password=make_password(None),
+        nickname=nickname,
+        kakao_id=kakao_id,
+    )
+    UserSkinProfile.objects.create(user=user)
+    return user, True
+
+
+@csrf_exempt
+def kakao_app_login(request):
+    """
+    Flutter 앱용 카카오 로그인.
+    앱이 카카오 SDK로 받은 access_token을 전달 → 백엔드가 유저 조회 + JWT 발급.
+    """
+    if request.method != "POST":
+        return JsonResponse({"success": False, "message": "POST 요청만 허용됩니다."}, status=405)
+
+    try:
+        data = json.loads(request.body.decode("utf-8"))
+    except json.JSONDecodeError:
+        return JsonResponse({"success": False, "message": "JSON 형식이 올바르지 않습니다."}, status=400)
+
+    kakao_access_token = data.get("access_token")
+    if not kakao_access_token:
+        return JsonResponse({"success": False, "message": "access_token이 필요합니다."}, status=400)
+
+    # 카카오 유저 정보 조회
+    user_info_req = urllib.request.Request(
+        "https://kapi.kakao.com/v2/user/me",
+        headers={"Authorization": f"Bearer {kakao_access_token}"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(user_info_req, timeout=10) as resp:
+            user_info = json.loads(resp.read().decode("utf-8"))
+    except Exception as e:
+        return JsonResponse({"success": False, "message": f"카카오 유저 정보 요청 실패: {e}"}, status=502,
+                            json_dumps_params={"ensure_ascii": False})
+
+    user, is_new = _get_or_create_kakao_user(user_info)
     tokens = _get_tokens(user)
     return JsonResponse(
         {
