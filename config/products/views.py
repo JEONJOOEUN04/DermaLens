@@ -428,9 +428,14 @@ def ingredient_scan(request, product_id):
     # 이미지 파일 업로드 시 저장
     if image_file and not image_url:
         import os
+        import uuid
         upload_dir = os.path.join(settings.MEDIA_ROOT, "scan_images")
         os.makedirs(upload_dir, exist_ok=True)
-        file_name = f"scan_p{product_id}_u{user_id or 'admin'}_{image_file.name}"
+        # 확장자만 원본에서 추출, 파일명은 URL 안전하게 생성 (공백/한글 방지)
+        ext = os.path.splitext(image_file.name)[1].lower() or ".jpg"
+        if ext not in (".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic"):
+            ext = ".jpg"
+        file_name = f"scan_p{product_id}_u{user_id or 'admin'}_{uuid.uuid4().hex[:12]}{ext}"
         file_path = os.path.join(upload_dir, file_name)
         with open(file_path, "wb") as f:
             for chunk in image_file.chunks():
