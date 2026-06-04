@@ -1036,3 +1036,28 @@ def chat(request):
         response["session_id"] = session.session_id
 
     return JsonResponse(response, json_dumps_params={"ensure_ascii": False})
+
+
+# =====================
+# 성분 자동완성 (챗봇 타이핑용)
+# =====================
+
+@require_GET
+def ingredient_autocomplete(request):
+    """성분명 부분일치 자동완성. 이름 배열만 반환."""
+    q = (request.GET.get("q") or "").strip()
+    try:
+        limit = min(int(request.GET.get("limit", 8)), 20)
+    except ValueError:
+        limit = 8
+
+    if not q:
+        return JsonResponse({"ingredients": []}, json_dumps_params={"ensure_ascii": False})
+
+    names = list(
+        Ingredient.objects
+        .filter(Q(ingredient_name_kr__icontains=q) | Q(ingredient_name_en__icontains=q))
+        .order_by("ingredient_name_kr")
+        .values_list("ingredient_name_kr", flat=True)[:limit]
+    )
+    return JsonResponse({"ingredients": names}, json_dumps_params={"ensure_ascii": False})
