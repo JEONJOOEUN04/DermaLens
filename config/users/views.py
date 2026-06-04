@@ -12,7 +12,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from .models import (
     User, UserSkinProfile, SurveyResponse,
     SkinTypeMaster, TextureMaster, AllergyMaster, SkinConcernMaster,
-    UserSkinConcern, UserAllergy, UserNotification,
+    UserSkinConcern, UserAllergy, UserNotification, PointHistory,
 )
 
 
@@ -22,6 +22,7 @@ def _user_to_dict(user):
         "email": user.email,
         "nickname": user.nickname,
         "is_staff": user.is_staff,
+        "points": user.points or 0,
         "created_at": str(user.created_at),
     }
 
@@ -501,6 +502,32 @@ def mypage(request, user_id):
                 "analysis_count": analysis_count,
             },
         },
+        json_dumps_params={"ensure_ascii": False},
+    )
+
+
+@require_GET
+def my_points(request, user_id):
+    """누적 포인트 + 적립/사용 내역."""
+    try:
+        user = User.objects.get(user_id=user_id, is_active=True)
+    except User.DoesNotExist:
+        return JsonResponse({"success": False, "message": "사용자를 찾을 수 없습니다."}, status=404,
+                            json_dumps_params={"ensure_ascii": False})
+
+    history = PointHistory.objects.filter(user=user).order_by("-created_at")[:100]
+    data = [
+        {
+            "history_id": h.history_id,
+            "points": h.points,
+            "reason": h.reason,
+            "related_product_id": h.related_product_id,
+            "created_at": str(h.created_at),
+        }
+        for h in history
+    ]
+    return JsonResponse(
+        {"success": True, "total_points": user.points or 0, "count": len(data), "history": data},
         json_dumps_params={"ensure_ascii": False},
     )
 

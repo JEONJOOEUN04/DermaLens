@@ -353,3 +353,174 @@ def category_list(request):
             "subcategories": children,
         })
     return JsonResponse({"success": True, "categories": data}, json_dumps_params={"ensure_ascii": False})
+
+
+# =====================
+# 성분 스캔 기여 (사용자 OCR → 제품 성분 누적 + 리워드)
+# =====================
+
+MAX_CONTRIBUTORS = 10          # 제품당 최대 기여자 수
+CONFIRM_THRESHOLD = 2          # 성분 확정 기준 (검출 횟수)
+REWARD_FIRST = 5               # 최초 등록 리워드 (원)
+REWARD_VERIFY = 1             # 추가 검증 리워드 (원)
+
+
+def _match_ingredient(name):
+    """성분명 → DB 매칭: 정확 → alias → 부분일치."""
+    name = (name or "").strip()
+    if not name:
+        return None
+    ing = Ingredient.objects.filter(
+        Q(ingredient_name_kr__iexact=name) | Q(ingredient_name_en__iexact=name)
+    ).first()
+    if ing:
+        return ing
+    alias = IngredientAlias.objects.filter(alias_name__iexact=name, is_active=True).first()
+    if alias:
+        return alias.ingredient
+    return Ingredient.objects.filter(
+        Q(ingredient_name_kr__icontains=name) | Q(ingredient_name_en__icontains=name)
+    ).first()
+
+
+def _call_ocr_for_ingredients(image_url):
+    """OCR 서버 호출 → 성분 리스트 반환. 실패 시 빈 리스트."""
+    ocr_server_url = getattr(settings, "OCR_SERVER_URL", "https://web-production-38634.up.railway.app")
+    payload = json.dumps({"user_id": "scan", "image_url": image_url}).encode("utf-8")
+    req = urllib.request.Request(
+        f"{ocr_server_url}/ocr", data=payload,
+        headers={"Content-Type": "application/json"}, method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        # OCR 서버 응답에서 ingredients 추출 (sent_payload 또는 result 안)
+        sp = data.get("sent_payload") or data.get("result", {}).get("sent_payload") or {}
+        return sp.get("ingredients", []) or data.get("ingredients", [])
+    except Exception:
+        return []
+
+
+@csrf_exempt
+def ingredient_scan(request, product_id):
+    """
+    제품 성분표 사진 업로드 → OCR 추출 → 성분 누적 + 리워드 적립.
+    - 1인 1제품 1회 / 제품당 최대 10명
+    - 최초 기여 5원, 이후 1원 / OCR 실패 시 0원(시도 미차감)
+    """
+    from products.models import ProductIngredientCandidate, ProductScanContribution
+    from users.models import User, PointHistory
+
+    if request.method != "POST":
+        return JsonResponse({"success": False, "message": "POST 요청만 허용됩니다."}, status=405)
+
+    try:
+        product = Product.objects.get(product_id=product_id)
+    except Product.DoesNotExist:
+        return JsonResponse({"success": False, "message": "제품을 찾을 수 없습니다."}, status=404,
+                            json_dumps_params={"ensure_ascii": False})
+
+    user_id = request.POST.get("user_id")
+    is_admin = request.POST.get("is_admin") in ("true", "1", "True")
+    image_url = request.POST.get("image_url", "")
+    image_file = request.FILES.get("image")
+
+    # 이미지 파일 업로드 시 저장
+    if image_file and not image_url:
+        import os
+        upload_dir = os.path.join(settings.MEDIA_ROOT, "scan_images")
+        os.makedirs(upload_dir, exist_ok=True)
+        file_name = f"scan_p{product_id}_u{user_id or 'admin'}_{image_file.name}"
+        file_path = os.path.join(upload_dir, file_name)
+        with open(file_path, "wb") as f:
+            for chunk in image_file.chunks():
+                f.write(chunk)
+        base_url = getattr(settings, "BASE_URL", "https://dermalens-production.up.railway.app")
+        image_url = f"{base_url}{settings.MEDIA_URL}scan_images/{file_name}"
+
+    if not image_url:
+        return JsonResponse({"success": False, "message": "image 또는 image_url이 필요합니다."}, status=400)
+
+    # 사용자 기여인 경우 제한 검사
+    if not is_admin:
+        if not user_id:
+            return JsonResponse({"success": False, "message": "user_id가 필요합니다."}, status=400)
+        if ProductScanContribution.objects.filter(user_id=user_id, product=product).exists():
+            return JsonResponse({"success": False, "message": "이미 이 제품에 사진을 등록했습니다."}, status=400,
+                                json_dumps_params={"ensure_ascii": False})
+        contributor_count = ProductScanContribution.objects.filter(product=product).count()
+        if contributor_count >= MAX_CONTRIBUTORS:
+            return JsonResponse({"success": False, "message": f"이 제품은 이미 {MAX_CONTRIBUTORS}명이 등록을 완료했습니다."}, status=400,
+                                json_dumps_params={"ensure_ascii": False})
+
+    # OCR 호출
+    raw_ingredients = _call_ocr_for_ingredients(image_url)
+
+    # 성분 정규화 + 후보 누적
+    matched_ids = set()
+    for name in raw_ingredients:
+        ing = _match_ingredient(str(name))
+        if ing:
+            matched_ids.add(ing.ingredient_id)
+
+    # OCR 실패 (추출 성분 0) → 리워드 0, 시도 미차감
+    if not matched_ids:
+        return JsonResponse({
+            "success": False,
+            "message": "성분을 인식하지 못했습니다. 더 선명한 사진으로 다시 시도해주세요.",
+            "reward_points": 0,
+            "detected_count": 0,
+        }, json_dumps_params={"ensure_ascii": False})
+
+    newly_confirmed = []
+    for ing_id in matched_ids:
+        cand, created = ProductIngredientCandidate.objects.get_or_create(
+            product=product, ingredient_id=ing_id,
+        )
+        if not created:
+            cand.detection_count += 1
+        # 확정 처리
+        if not cand.confirmed and cand.detection_count >= CONFIRM_THRESHOLD:
+            cand.confirmed = True
+            ProductIngredient.objects.get_or_create(product=product, ingredient_id=ing_id)
+            newly_confirmed.append(ing_id)
+        cand.save()
+
+    # 관리자는 기록/리워드 없음 (검수용)
+    if is_admin:
+        return JsonResponse({
+            "success": True,
+            "message": "관리자 성분 등록 완료",
+            "detected_count": len(matched_ids),
+            "newly_confirmed": len(newly_confirmed),
+            "reward_points": 0,
+        }, json_dumps_params={"ensure_ascii": False})
+
+    # 사용자 리워드 계산
+    is_first = not ProductScanContribution.objects.filter(product=product).exists()
+    reward = REWARD_FIRST if is_first else REWARD_VERIFY
+
+    ProductScanContribution.objects.create(
+        user_id=user_id, product=product, image_url=image_url,
+        detected_count=len(matched_ids), reward_points=reward, is_first=is_first,
+    )
+
+    # 포인트 적립
+    user = User.objects.get(user_id=user_id)
+    user.points = (user.points or 0) + reward
+    user.save(update_fields=["points"])
+    PointHistory.objects.create(
+        user=user, points=reward,
+        reason="성분 등록 최초" if is_first else "성분 등록 검증",
+        related_product_id=product_id,
+    )
+
+    return JsonResponse({
+        "success": True,
+        "message": f"성분 등록 완료! {reward}원 적립되었습니다.",
+        "detected_count": len(matched_ids),
+        "newly_confirmed": len(newly_confirmed),
+        "reward_points": reward,
+        "total_points": user.points,
+        "is_first": is_first,
+    }, json_dumps_params={"ensure_ascii": False})

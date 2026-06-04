@@ -15,6 +15,7 @@ urlpatterns = [
     path("skin-profile/<int:user_id>/update/", views.update_skin_profile),
     path("survey/", views.save_survey),
     path("mypage/<int:user_id>/", views.mypage),
+    path("mypage/<int:user_id>/points/", views.my_points),
     path("mypage/<int:user_id>/likes/", views.my_liked_products),
     path("mypage/<int:user_id>/reviews/", views.my_reviews),
     path("mypage/<int:user_id>/analysis/", views.my_analysis_history),

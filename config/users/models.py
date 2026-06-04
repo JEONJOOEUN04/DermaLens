@@ -9,6 +9,7 @@ class User(models.Model):
     kakao_id = models.CharField(max_length=100, null=True, blank=True, unique=True)
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
+    points = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -168,4 +169,17 @@ class UserNotification(models.Model):
 
     class Meta:
         db_table = 'UserNotification'
+        ordering = ['-created_at']
+
+
+class PointHistory(models.Model):
+    history_id = models.AutoField(primary_key=True)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, db_column='user_id')
+    points = models.IntegerField()  # 적립 +, 사용 -
+    reason = models.CharField(max_length=100)  # 예: '성분 등록 최초', '성분 등록 검증'
+    related_product_id = models.IntegerField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'PointHistory'
         ordering = ['-created_at']

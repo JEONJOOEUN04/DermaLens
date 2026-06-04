@@ -134,3 +134,33 @@ class ProductLike(models.Model):
     class Meta:
         db_table = 'ProductLike'
         unique_together = ('user', 'product')
+
+
+class ProductIngredientCandidate(models.Model):
+    """제품 성분 후보 (OCR 교차검증용). 2회 이상 검출 시 ProductIngredient로 확정."""
+    candidate_id = models.AutoField(primary_key=True)
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, db_column='product_id')
+    ingredient = models.ForeignKey(Ingredient, on_delete=models.CASCADE, db_column='ingredient_id')
+    detection_count = models.IntegerField(default=1)
+    confirmed = models.BooleanField(default=False)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'ProductIngredientCandidate'
+        unique_together = ('product', 'ingredient')
+
+
+class ProductScanContribution(models.Model):
+    """제품 성분 스캔 기여 기록 (1인 1제품 1회, 제품당 10명 제한)."""
+    contribution_id = models.AutoField(primary_key=True)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, db_column='user_id')
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, db_column='product_id')
+    image_url = models.TextField(null=True, blank=True)
+    detected_count = models.IntegerField(default=0)  # 추출된 성분 수
+    reward_points = models.IntegerField(default=0)
+    is_first = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'ProductScanContribution'
+        unique_together = ('user', 'product')

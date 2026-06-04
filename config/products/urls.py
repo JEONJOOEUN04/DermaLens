@@ -12,4 +12,5 @@ urlpatterns = [
     path("popular/", views.product_popular),
     path("<int:product_id>/", views.product_detail),
     path("<int:product_id>/ingredients/", views.product_ingredients),
+    path("<int:product_id>/ingredient-scan/", views.ingredient_scan),
 ]
