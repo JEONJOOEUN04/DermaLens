@@ -864,23 +864,37 @@ def _build_chat_response(chatbot_resp: dict, user_id: int | None) -> dict:
 
     elif intent in ("INGREDIENT_RISK", "INGREDIENT_ANALYSIS"):
         ing_name = keywords.get("ingredient", "")
-        if ing_name:
-            ing = _match_ingredient(ing_name)
-            if ing:
-                risk = ing.risk_level or 0
-                risk_label = "HIGH" if risk >= 7 else ("MEDIUM" if risk >= 4 else "LOW")
-                components.append({
-                    "type": "card",
-                    "title": ing.ingredient_name_kr,
-                    "description": ing.description or ing.ingredient_name_en or "",
-                    "riskLevel": risk_label,
-                    "allergy_flag": ing.allergy_flag,
-                    "irritant_flag": ing.irritant_flag,
-                    "acne_caution_flag": ing.acne_caution_flag,
-                    "moisturizing_flag": ing.moisturizing_flag,
-                    "soothing_flag": ing.soothing_flag,
-                    "buttonText": "성분 상세보기",
-                })
+        ing = _match_ingredient(ing_name) if ing_name else None
+        if ing:
+            risk = ing.risk_level or 0
+            risk_label = "HIGH" if risk >= 7 else ("MEDIUM" if risk >= 4 else "LOW")
+            components.append({
+                "type": "card",
+                "title": ing.ingredient_name_kr,
+                "description": ing.description or ing.ingredient_name_en or "",
+                "riskLevel": risk_label,
+                "allergy_flag": ing.allergy_flag,
+                "irritant_flag": ing.irritant_flag,
+                "acne_caution_flag": ing.acne_caution_flag,
+                "moisturizing_flag": ing.moisturizing_flag,
+                "soothing_flag": ing.soothing_flag,
+                "buttonText": "성분 상세보기",
+            })
+        else:
+            # 성분 못 찾음 → 챗봇이 안내 메시지 띄울 수 있도록 신호
+            label = ing_name or "해당"
+            message = f"'{label}' 성분 정보를 찾을 수 없어요. 성분명을 다시 확인해 주세요."
+            if not quick_replies:
+                quick_replies = ["제품 추천", "피부 진단"]
+            return {
+                "intent": intent,
+                "score": chatbot_resp.get("score", 0),
+                "keywords": keywords,
+                "message": message,
+                "components": components,
+                "quickReplies": quick_replies,
+                "not_found": True,
+            }
         if not quick_replies:
             quick_replies = ["제품 추천", "피부 진단"]
 
