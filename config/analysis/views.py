@@ -864,6 +864,40 @@ def _build_chat_response(chatbot_resp: dict, user_id: int | None) -> dict:
             sens = Q(skin_type__skin_type_code__contains="S")
             code_filter = sens if code_filter is None else (code_filter & sens)
 
+        # 요청한 피부타입 토큰 집합 (제품명 표기 충돌 검사용)
+        requested_tokens = set()
+        if "지성" in skin_type or "오일" in skin_type:
+            requested_tokens.add("지성")
+        if "건성" in skin_type or "건조" in skin_type:
+            requested_tokens.add("건성")
+        if "민감" in skin_type:
+            requested_tokens.add("민감")
+        if "복합" in skin_type:
+            requested_tokens.update(["건성", "지성"])
+        if "여드름" in skin_type:
+            requested_tokens.update(["지성", "민감"])
+
+        def _skin_ok(name):
+            """제품명에 요청과 다른 피부타입 표기만 있으면 제외."""
+            if not requested_tokens:
+                return True
+            name = name or ""
+            ptoks = set()
+            if "지성" in name:
+                ptoks.add("지성")
+            if "건성" in name:
+                ptoks.add("건성")
+            if "민감" in name:
+                ptoks.add("민감")
+            if "복합" in name:
+                ptoks.update(["건성", "지성"])
+            if "여드름" in name:
+                ptoks.update(["지성", "민감"])
+            # 표기가 있는데 요청 타입과 하나도 안 겹치면 충돌 → 제외
+            if ptoks and not (ptoks & requested_tokens):
+                return False
+            return True
+
         products = []
         if code_filter is not None:
             # 해당 피부타입 유저들이 높게 평가한 제품 순
@@ -877,19 +911,27 @@ def _build_chat_response(chatbot_resp: dict, user_id: int | None) -> dict:
                     .values("product_id")
                     .annotate(avg=Avg("rating"), cnt=Count("review_id"))
                     .filter(cnt__gte=1)
-                    .order_by("-avg", "-cnt")[:5]
+                    .order_by("-avg", "-cnt")[:20]
                 )
                 ranked_ids = [r["product_id"] for r in ranked]
                 if ranked_ids:
                     pmap = {p.product_id: p for p in base_qs.filter(product_id__in=ranked_ids)}
-                    products = [pmap[pid] for pid in ranked_ids if pid in pmap]
+                    for pid in ranked_ids:
+                        p = pmap.get(pid)
+                        if p and _skin_ok(p.product_name):
+                            products.append(p)
+                        if len(products) >= 5:
+                            break
 
-        # 피부타입 매칭 결과가 부족하면 카테고리 기본 제품으로 보강
+        # 피부타입 매칭 결과가 부족하면 카테고리 기본 제품으로 보강 (충돌 표기 제외)
         if len(products) < 5:
             have = {p.product_id for p in products}
             for p in base_qs.order_by("product_id"):
-                if p.product_id not in have:
-                    products.append(p)
+                if p.product_id in have:
+                    continue
+                if not _skin_ok(p.product_name):
+                    continue
+                products.append(p)
                 if len(products) >= 5:
                     break
 
