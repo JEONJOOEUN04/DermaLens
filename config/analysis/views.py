@@ -842,13 +842,58 @@ def _build_chat_response(chatbot_resp: dict, user_id: int | None) -> dict:
 
     if intent == "PRODUCT_RECOMMEND":
         category_name = keywords.get("category", "")
+        skin_type = keywords.get("skin_type", "")
 
-        qs = Product.objects.select_related("brand", "category")
+        # 카테고리 필터
+        base_qs = Product.objects.select_related("brand", "category")
         if category_name:
-            qs = qs.filter(category__category_name__icontains=category_name)
-        products = qs.order_by("product_id")[:5]
+            base_qs = base_qs.filter(category__category_name__icontains=category_name)
 
-        for p in products:
+        # 피부타입 키워드 → SkinTypeMaster 코드 조건 매핑
+        #   코드 형식: [O지성/D건성][S민감/N비민감][+수분충분/-수분부족]
+        from users.models import UserSkinProfile
+        from review.models import Review
+        from django.db.models import Avg, Count
+
+        code_filter = None
+        if "지성" in skin_type or "오일" in skin_type:
+            code_filter = Q(skin_type__skin_type_code__startswith="O")
+        elif "건성" in skin_type or "건조" in skin_type:
+            code_filter = Q(skin_type__skin_type_code__startswith="D")
+        if "민감" in skin_type:
+            sens = Q(skin_type__skin_type_code__contains="S")
+            code_filter = sens if code_filter is None else (code_filter & sens)
+
+        products = []
+        if code_filter is not None:
+            # 해당 피부타입 유저들이 높게 평가한 제품 순
+            user_ids = list(
+                UserSkinProfile.objects.filter(code_filter).values_list("user_id", flat=True)
+            )
+            if user_ids:
+                ranked = (
+                    Review.objects
+                    .filter(user_id__in=user_ids, product__in=base_qs)
+                    .values("product_id")
+                    .annotate(avg=Avg("rating"), cnt=Count("review_id"))
+                    .filter(cnt__gte=1)
+                    .order_by("-avg", "-cnt")[:5]
+                )
+                ranked_ids = [r["product_id"] for r in ranked]
+                if ranked_ids:
+                    pmap = {p.product_id: p for p in base_qs.filter(product_id__in=ranked_ids)}
+                    products = [pmap[pid] for pid in ranked_ids if pid in pmap]
+
+        # 피부타입 매칭 결과가 부족하면 카테고리 기본 제품으로 보강
+        if len(products) < 5:
+            have = {p.product_id for p in products}
+            for p in base_qs.order_by("product_id"):
+                if p.product_id not in have:
+                    products.append(p)
+                if len(products) >= 5:
+                    break
+
+        for p in products[:5]:
             components.append({
                 "type": "card",
                 "product_id": p.product_id,
