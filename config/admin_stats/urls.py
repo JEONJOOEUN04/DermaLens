@@ -2,6 +2,9 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
+    # 회원 목록
+    path("users", views.users_list),
+
     # 유저 현황
     path("stats/users/count", views.users_count),
     path("stats/users/signups", views.users_signups),

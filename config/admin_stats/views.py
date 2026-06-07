@@ -442,6 +442,71 @@ def review_moderate(request, review_id):
 # =====================
 
 @require_GET
+def users_list(request):
+    """전체 회원 목록 (검색·페이지네이션). 피부타입·포인트·활동수 포함."""
+    err = _require_staff(request)
+    if err:
+        return err
+    from users.models import User, UserSkinProfile
+    from review.models import Review
+    from products.models import ProductLike
+
+    q = (request.GET.get("q") or "").strip()
+    page = int(request.GET.get("page", 1))
+    size = min(int(request.GET.get("size", 20)), 100)
+    offset = (page - 1) * size
+
+    qs = User.objects.all().order_by("-user_id")
+    if q:
+        qs = qs.filter(Q(email__icontains=q) | Q(nickname__icontains=q))
+
+    total = qs.count()
+    users = list(qs[offset:offset + size])
+    uids = [u.user_id for u in users]
+
+    # 피부타입 매핑
+    profiles = {
+        p.user_id: p for p in
+        UserSkinProfile.objects.filter(user_id__in=uids).select_related("skin_type")
+    }
+    # 활동 수 집계
+    review_counts = dict(
+        Review.objects.filter(user_id__in=uids).values_list("user_id").annotate(c=Count("review_id"))
+    )
+    like_counts = dict(
+        ProductLike.objects.filter(user_id__in=uids).values_list("user_id").annotate(c=Count("product_id"))
+    )
+
+    data = []
+    for u in users:
+        prof = profiles.get(u.user_id)
+        data.append({
+            "user_id": u.user_id,
+            "email": u.email,
+            "nickname": u.nickname,
+            "skin_type": prof.skin_type.skin_type_name_kr if prof and prof.skin_type else None,
+            "skin_type_code": prof.skin_type.skin_type_code if prof and prof.skin_type else None,
+            "provider": "kakao" if u.kakao_id else "email",
+            "points": u.points or 0,
+            "is_staff": u.is_staff,
+            "is_active": u.is_active,
+            "review_count": review_counts.get(u.user_id, 0),
+            "like_count": like_counts.get(u.user_id, 0),
+            "created_at": str(u.created_at),
+        })
+
+    return JsonResponse({
+        "success": True,
+        "page": page,
+        "size": size,
+        "count": len(data),
+        "total_count": total,
+        "total_pages": (total + size - 1) // size,
+        "users": data,
+    }, json_dumps_params={"ensure_ascii": False})
+
+
+@require_GET
 def activity_logs(request):
     """전체 유저 활동 로그 (분석 + 검색 + 제품조회) 통합, 최신순."""
     err = _require_staff(request)
