@@ -379,9 +379,24 @@ def analysis_detail(request, analysis_id):
         for d in details
     ]
 
+    # 매칭된 제품 정보 (OCR 저장 시 product_id 연결됨)
+    matched_product_info = None
+    if analysis.product_id:
+        from products.models import Product
+        p = Product.objects.filter(product_id=analysis.product_id).select_related("brand").first()
+        if p:
+            matched_product_info = {
+                "product_id": p.product_id,
+                "product_name": p.product_name,
+                "brand_name": p.brand.brand_name_kr if p.brand else "",
+                "image_url": p.image_url,
+                "price": p.price,
+            }
+
     return JsonResponse(
         {
             "success": True,
+            "matched_product": matched_product_info,
             "analysis": {
                 "analysis_id": analysis.analysis_id,
                 "user_id": analysis.user_id,
