@@ -177,6 +177,30 @@ def upload_ocr_image(request):
     )
 
 
+def _match_product_by_name(product_name):
+    """OCR이 추출한 제품명으로 DB Product 매칭.
+    OCR명이 DB 제품명의 부분 문자열인 경우가 많아(브랜드·용량 누락),
+    핵심 토큰들이 모두 포함된 제품을 찾는다."""
+    from products.models import Product
+    name = (product_name or "").strip()
+    if not name:
+        return None
+
+    # 1) 정확 포함 (DB명에 OCR명이 통째로 들어있는 경우)
+    p = Product.objects.filter(product_name__icontains=name).order_by("product_id").first()
+    if p:
+        return p
+
+    # 2) 토큰 AND 매칭 — OCR명을 공백으로 나눠 모든 토큰을 포함하는 제품
+    tokens = [t for t in name.split() if len(t) >= 2]
+    if not tokens:
+        return None
+    qs = Product.objects.all()
+    for t in tokens:
+        qs = qs.filter(product_name__icontains=t)
+    return qs.order_by("product_id").first()
+
+
 @csrf_exempt
 def save_ocr_result(request):
     if request.method != "POST":
@@ -204,6 +228,13 @@ def save_ocr_result(request):
         return JsonResponse({"success": False, "message": "user_id가 필요합니다."}, status=400)
     if not ingredients:
         return JsonResponse({"success": False, "message": "ingredients 배열이 필요합니다."}, status=400)
+
+    # product_id 없으면 OCR 제품명으로 DB 제품 자동 매칭
+    matched_product = None
+    if not product_id and product_name:
+        matched_product = _match_product_by_name(product_name)
+        if matched_product:
+            product_id = matched_product.product_id
 
     if ocr_image_id:
         try:
@@ -289,11 +320,22 @@ def save_ocr_result(request):
         for item in matched_list
     ]
 
+    matched_product_info = None
+    if matched_product:
+        matched_product_info = {
+            "product_id": matched_product.product_id,
+            "product_name": matched_product.product_name,
+            "brand_name": matched_product.brand.brand_name_kr if matched_product.brand else "",
+            "image_url": matched_product.image_url,
+            "price": matched_product.price,
+        }
+
     return JsonResponse(
         {
             "success": True,
             "message": "OCR 분석이 완료되었습니다.",
             "analysis_id": analysis.analysis_id,
+            "matched_product": matched_product_info,
             "product_name": analysis.product_name,
             "capacity": analysis.capacity,
             "usage": analysis.usage,
